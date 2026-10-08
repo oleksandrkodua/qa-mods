@@ -1,0 +1,8 @@
+{
+  "name": "verification-guard",
+  "version": "0.1.1",
+  "description": "Checks Claude's claims (tests pass, verified, fixed, no regression, API returns N) against the tool calls that actually ran. Unsupported claims get a visible warning; /evidence lists claims and the evidence behind each. Warns only, never blocks.",
+  "author": {
+    "name": "noaod"
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "name": "qa-mods",
+  "owner": {
+    "name": "noaod"
+  },
+  "plugins": [
+    {
+      "name": "sandbox-guard",
+      "source": "./sandbox-guard",
+      "description": "Denies writes to protected Claude config paths and hands back a Terminal command"
+    },
+    {
+      "name": "remote-gate",
+      "source": "./remote-gate",
+      "description": "Asks before git push and wrangler --remote, showing the folder, the branch, the remote and the commits that will go out. Understands git -C dir and cd dir &&. Fail closed."
+    },
+    {
+      "name": "blast-radius",
+      "source": "./blast-radius",
+      "description": "Shows what a risky Bash command will touch before it runs"
+    },
+    {
+      "name": "retry-analyzer",
+      "source": "./retry-analyzer",
+      "description": "Detects repeated identical failing tool calls and tells Claude to change strategy"
+    },
+    {
+      "name": "secret-redactor",
+      "source": "./secret-redactor",
+      "description": "Masks tokens and keys in tool output"
+    },
+    {
+      "name": "evidence-saver",
+      "source": "./evidence-saver",
+      "description": "Saves screenshots from tool results to a folder the user picks (asked once, remembered; /evidence-dir)"
+    },
+    {
+      "name": "replay-theater",
+      "source": "./replay-theater",
+      "description": "/replay: step through the session's file edits one by one"
+    },
+    {
+      "name": "verification-guard",
+      "source": "./verification-guard",
+      "description": "Checks Claude's claims (tests pass, verified, fixed) against tool calls that actually ran; warns on unsupported ones; /evidence"
+    },
+    {
+      "name": "handoff",
+      "source": "./handoff",
+      "description": "From 80% of the context: a button (desktop), a hint line (terminal) or a hint after the answer (VS Code) offering /handoff, which puts a HANDOFF.md/CONTEXT.md prompt into the input box."
+    },
+    {
+      "name": "notify",
+      "source": "./notify",
+      "description": "A quick pop-up (toast, plus a macOS system notification) when a long Bash command or a long turn finishes, so you can stop watching it."
+    },
+    {
+      "name": "quick-actions",
+      "source": "./quick-actions",
+      "description": "Compact and Clear buttons in the footer; each asks to confirm or cancel before it runs the slash command. In VS Code (no footer) the typed /compact and /clear ask first."
+    },
+    {
+      "name": "hud",
+      "source": "./hud",
+      "description": "Rate-limit windows and session cost above the prompt, a prompt-cache countdown in the footer, and /hud with the same figures as text."
+    },
+    {
+      "name": "next-steps-uk",
+      "source": "./next-steps-uk",
+      "description": "Fork of next-steps (MIT, Thariq Shihipar): suggested next prompts are always written in Ukrainian. Install INSTEAD of next-steps."
+    },
+    {
+      "name": "plan-progress",
+      "source": "./plan-progress",
+      "description": "Fork of plan-progress 0.7.6 (zycck, MIT): live progress bars above the prompt, a wider title and the full title on hover. Install INSTEAD of plan-progress@zycck-mods."
+    }
+  ],
+  "description": "QA mods pack: sandbox-guard, remote-gate, blast-radius, retry-analyzer, secret-redactor, evidence-saver, replay-theater, verification-guard, handoff, notify, quick-actions, hud, next-steps-uk, plan-progress (fork). Install all with install-pack.sh."
+}

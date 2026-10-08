@@ -1,0 +1,32 @@
+{
+  "name": "handoff",
+  "version": "0.6.2",
+  "description": "The mini Clippy beside the band above the prompt: calm / worried / panic by context fill, with random Ukrainian remarks; /handoff puts a HANDOFF.md/CONTEXT.md prompt into the input box (the hud band has its button). VS Code: a hint after the answer from 80%.",
+  "author": {
+    "name": "noaod"
+  },
+  "userConfig": {
+    "warnPercent": {
+      "type": "number",
+      "title": "Colour the context amber from, percent",
+      "description": "The context line is always shown; from this fill it turns amber (and red from handoffAtPercent).",
+      "required": false,
+      "default": 50
+    },
+    "handoffAtPercent": {
+      "type": "number",
+      "title": "Offer handoff at, percent of context",
+      "description": "From this context fill a button (desktop), a hint line (terminal) or a hint after the answer (VS Code) offers /handoff.",
+      "required": false,
+      "default": 80
+    },
+    "remarkEverySeconds": {
+      "type": "number",
+      "title": "Clippy random remark every, seconds",
+      "description": "A short random phrase from the Clippy about this often (x0.5..1.5, shown for 9 s). 0: no random phrases.",
+      "required": false,
+      "default": 120
+    }
+  },
+  "types": "./types/index.d.ts"
+}

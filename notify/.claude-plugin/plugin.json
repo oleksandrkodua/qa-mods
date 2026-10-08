@@ -1,0 +1,29 @@
+{
+  "name": "notify",
+  "version": "0.2.1",
+  "description": "A quick pop-up (toast, plus a macOS system notification) when a long Bash command or a long turn finishes, so you can stop watching it.",
+  "author": { "name": "noaod" },
+  "userConfig": {
+    "longCommandSeconds": {
+      "type": "number",
+      "title": "Long command, seconds",
+      "description": "Notify when a Bash command ran at least this long (a build, a test run, an install).",
+      "required": false,
+      "default": 30
+    },
+    "longTurnSeconds": {
+      "type": "number",
+      "title": "Long turn, seconds",
+      "description": "Notify when a whole turn ran at least this long.",
+      "required": false,
+      "default": 120
+    },
+    "systemNotification": {
+      "type": "boolean",
+      "title": "Also send a macOS system notification",
+      "description": "On macOS a toast lives inside the window; the system notification reaches you when you look at another app.",
+      "required": false,
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "remote-gate",
+  "version": "0.1.1",
+  "description": "Asks before git push and wrangler --remote, showing the folder, the branch, the remote and the commits that will go out. Understands git -C dir and cd dir &&. Fail closed.",
+  "author": {
+    "name": "noaod"
+  }
+}

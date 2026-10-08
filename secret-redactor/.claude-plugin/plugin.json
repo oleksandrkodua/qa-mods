@@ -1,0 +1,6 @@
+{
+  "name": "secret-redactor",
+  "version": "0.1.4",
+  "description": "Masks API keys, tokens, private keys and password assignments in tool results before the model sees them.",
+  "author": { "name": "noaod" }
+}

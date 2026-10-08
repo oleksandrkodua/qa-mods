@@ -1,0 +1,8 @@
+{
+  "name": "quick-actions",
+  "version": "0.3.0",
+  "description": "In VS Code (no band above the prompt) the typed /compact and /clear ask first (confirm / cancel). The Compact and Clear buttons of the desktop and terminal are in the hud band.",
+  "author": {
+    "name": "noaod"
+  }
+}

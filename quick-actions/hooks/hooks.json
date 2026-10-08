@@ -1,0 +1,4 @@
+{
+  "description": "Compact and Clear buttons in the footer with a confirm / cancel pop-up; typed /compact and /clear ask first in VS Code.",
+  "modules": ["./register.tsx"]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "hud",
+  "version": "0.6.3",
+  "author": {
+    "name": "noaod"
+  },
+  "description": "One line above the prompt: context fill, rate-limit windows, session cost, prompt-cache countdown, and the buttons handoff, Compact, Clear and Progress; /hud with the same figures as text.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheTtlMinutes": {
+      "type": "number",
+      "title": "Prompt cache lifetime, minutes",
+      "description": "How long the prompt cache is assumed to live after a reply. The countdown is an estimate: last reply plus this value.",
+      "required": false,
+      "default": 60
+    },
+    "warnPercent": {
+      "type": "number",
+      "title": "Warn at, percent of a limit",
+      "description": "Colour a limit amber from this value and show a toast once when it is crossed.",
+      "required": false,
+      "default": 80
+    },
+    "redPercent": {
+      "type": "number",
+      "title": "Red at, percent of a limit",
+      "description": "Show a limit in bold bright red from this value and toast once when it is crossed.",
+      "required": false,
+      "default": 85
+    },
+    "ctxWarnPercent": {
+      "type": "number",
+      "title": "Context amber from, percent",
+      "description": "The context figure turns amber from this fill.",
+      "required": false,
+      "default": 50
+    },
+    "ctxRedPercent": {
+      "type": "number",
+      "title": "Context red from, percent",
+      "description": "The context figure turns red from this fill.",
+      "required": false,
+      "default": 80
+    }
+  }
+}

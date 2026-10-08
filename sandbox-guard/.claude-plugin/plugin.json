@@ -1,0 +1,8 @@
+{
+  "name": "sandbox-guard",
+  "version": "0.1.5",
+  "description": "Denies Edit/Write/Bash writes to Claude config paths the sandbox cannot write (settings, skills, plugins, hooks, projects, ...) and tells Claude to hand the user a ready Terminal command instead of trying workarounds.",
+  "author": {
+    "name": "noaod"
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "description": "A tool.call hook counts consecutive failures per call signature (tool + arguments) and per tool+error head; at the threshold it adds a context note (or extends the deny text) telling Claude to stop repeating and change approach. A prompt.submit hook resets the counters when the user speaks.",
+  "modules": ["./register.ts"]
+}

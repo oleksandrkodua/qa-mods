@@ -1,0 +1,4 @@
+{
+  "description": "A tool.call hook records every call in an evidence ledger (kind: edit/test/http/browser/read/run, success). A turn.step stream hook reads the main loop's final answer, detects claims (en/ru/uk), judges them against the ledger and appends a warning text chunk before the stop chunk. A /evidence command prints claims, support and ledger counts.",
+  "modules": ["./register.ts"]
+}

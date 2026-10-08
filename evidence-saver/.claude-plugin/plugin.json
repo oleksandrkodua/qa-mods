@@ -1,0 +1,8 @@
+{
+  "name": "evidence-saver",
+  "version": "0.3.0",
+  "description": "Saves every image (screenshot) returned by a tool to a folder the user picks: the first screenshot asks for the path, the answer is remembered. /evidence-dir shows, sets or resets it.",
+  "author": {
+    "name": "noaod"
+  }
+}

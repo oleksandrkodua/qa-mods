@@ -1,0 +1,4 @@
+{
+  "description": "A tool.call hook on Bash runs analyze() on the command; for medium/high risk it expands path arguments (read-only glob listing via bash) and git state (git status --porcelain), then logs a Blast Radius summary through $.ui.log before the command runs. A dialog (Виконати / Скасувати / Other) is asked only for uncommitted or untracked files, the home folder, more than 20 files and hard risks such as sudo or git reset --hard; Скасувати, Other or a dialog that cannot be shown stops the command.",
+  "modules": ["./register.tsx"]
+}

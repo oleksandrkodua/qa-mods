@@ -1,0 +1,4 @@
+{
+  "description": "Toast and system notification when a long Bash command or a long turn finishes.",
+  "modules": ["./register.ts"]
+}

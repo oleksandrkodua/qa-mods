@@ -1,0 +1,8 @@
+{
+  "name": "blast-radius",
+  "version": "0.5.4",
+  "description": "Before a risky Bash command runs, says what it will touch. A plain deletion is judged by git: files outside git or tracked and clean get only a short label, a Ukrainian dialog (with the rm line, the number of files and a typed 'Other' decision) is for uncommitted changes, the home folder, more than 20 files and other hard risks. Static analysis plus read-only git, nothing is executed to preview.",
+  "author": {
+    "name": "noaod"
+  }
+}

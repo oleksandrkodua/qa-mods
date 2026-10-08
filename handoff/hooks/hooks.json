@@ -1,0 +1,6 @@
+{
+  "description": "From 80% of the context: a button (desktop), a hint line (terminal) or a hint after the answer (VS Code) offering /handoff, which puts a HANDOFF.md/CONTEXT.md prompt into the input box.",
+  "modules": [
+    "./register.tsx"
+  ]
+}

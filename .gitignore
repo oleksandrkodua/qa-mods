@@ -1,0 +1,5 @@
+.DS_Store
+node_modules/
+*.log
+plan-progress/tests/register.mjs
+plan-progress/tests/look.html

@@ -1,0 +1,4 @@
+{
+  "description": "A tool.call hook wraps next(e) and deep-masks every string in the result with known secret patterns.",
+  "modules": ["./register.ts"]
+}

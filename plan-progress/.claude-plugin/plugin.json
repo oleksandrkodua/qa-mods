@@ -1,0 +1,11 @@
+{
+  "name": "plan-progress",
+  "version": "0.7.6-qa.15",
+  "description": "Live plan progress bars above the Claude Code prompt: stages, steps, a pixel fill and soft sounds for decision, error and done (qa-mods fork: a wider title, the full title on hover, Ukrainian interface)",
+  "author": {
+    "name": "Kirill Serditov (fork: noaod)",
+    "url": "https://github.com/zycck"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

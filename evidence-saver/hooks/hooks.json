@@ -1,0 +1,6 @@
+{
+  "description": "A tool.call hook wraps next(e), finds base64 image blocks in the result and writes them (via $.fs.write + python3) into the folder from QA_EVIDENCE_DIR or $.store; with none set it asks once through $.ui.ask. A /evidence-dir command shows, sets or resets the folder. The result is returned unchanged apart from a context note with the saved path.",
+  "modules": [
+    "./register.ts"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "retry-analyzer",
+  "version": "0.1.1",
+  "description": "Detects Claude repeating the same failing tool call (3+ identical failures, or 4+ with the same error) and tells it to change strategy and tell the user. Never blocks.",
+  "author": {
+    "name": "noaod"
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "description": "A tool.call hook on Edit/Write/MultiEdit/NotebookEdit/Bash checks the target path (or the shell command text) against a protected list and returns { deny } with an instruction to give the user a Terminal command.",
+  "modules": ["./register.ts"]
+}

@@ -1,0 +1,4 @@
+{
+  "description": "A tool.call hook on Edit/Write/MultiEdit snapshots the file before and after each successful edit ($.fs.read) into $.store; a /replay command opens a pane (ui.render on Pane) with Prev/Next buttons and a Code diff for the current step.",
+  "modules": ["./register.tsx"]
+}
