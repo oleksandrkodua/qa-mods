@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
+import { HANDOFF_PROMPT } from '../hooks/register'
+
 const stub = (on: any) => {
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
@@ -114,7 +116,7 @@ describe('hud', () => {
     await ui.unmount()
   })
 
-  test('one line: context, limits; then the four buttons that run other mods\' commands', async ($, on) => {
+  test('one line: context, limits; then the four buttons', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
     stub(on)
     const ran: string[] = []
@@ -137,7 +139,7 @@ describe('hud', () => {
     await ui.unmount()
   })
 
-  test('Compact asks first: Підтвердити runs the command, Скасувати changes nothing; handoff and Прогрес run their commands', async ($, on) => {
+  test('Compact asks first: Підтвердити runs the command, Скасувати changes nothing; Прогрес runs its command', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
     stub(on)
     const ran: string[] = []
@@ -165,9 +167,51 @@ describe('hud', () => {
     expect(asked[1]).toContain('Очистити всю розмову')
     expect(ran).toEqual(['clear:plugin'])
 
-    await ui.press({ key: 'b-handoff' })
     await ui.press({ key: 'b-progress' })
-    expect(ran).toEqual(['clear:plugin', 'handoff:plugin', 'progress:plugin'])
+    expect(ran).toEqual(['clear:plugin', 'progress:plugin'])
+    await ui.unmount()
+  })
+
+  test('Handoff fills the box itself: no command runs, an empty box is replaced, a typed draft is kept (append)', async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
+    stub(on)
+    const ran: string[] = []
+    const filled: { text: string; mode: string }[] = []
+    let draft = ''
+    on('command.run', ($: any, e: any) => (ran.push(e.command), { text: '' }))
+    on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
+    on('prompt.fill', ($: any, e: any) => (filled.push({ text: e.text, mode: e.mode }), { isFilled: true }))
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.session.measure(MEASURE)
+
+    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
+
+    await ui.press({ key: 'b-handoff' })
+    draft = 'мій чернетковий текст'
+    await ui.press({ key: 'b-handoff' })
+
+    expect(ran).toEqual([])
+    expect(filled).toEqual([
+      { text: HANDOFF_PROMPT, mode: 'replace' },
+      { text: `\n\n${HANDOFF_PROMPT}`, mode: 'append' },
+    ])
+    await ui.unmount()
+  })
+
+  test('Handoff copies the text where the box cannot be filled', async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
+    stub(on)
+    const copied: string[] = []
+    on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+    on('prompt.fill', () => ({ isFilled: false }))
+    on('ui.copy', ($: any, e: any) => (copied.push(e.text), { isCopied: true }))
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.session.measure(MEASURE)
+
+    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
+
+    await ui.press({ key: 'b-handoff' })
+    expect(copied).toEqual([HANDOFF_PROMPT])
     await ui.unmount()
   })
 

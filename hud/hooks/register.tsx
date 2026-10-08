@@ -19,14 +19,25 @@ const ASK: Record<string, string> = {
 }
 const CHOICES = ['Підтвердити', 'Скасувати']
 
+// The same text as HANDOFF_PROMPT in handoff/hooks/logic.ts (a test keeps the two equal): the button fills the
+// box itself, so no command runs and the chat gets no `/handoff` bubble.
+export const HANDOFF_PROMPT = `Підготуй передачу контексту в новий чат. Нічого не коміть і не деплой.
+
+1. Онови (або створи в корені проєкту) HANDOFF.md і CONTEXT.md:
+   - HANDOFF.md: що зроблено в цій сесії, що відкрито і що перевірити наступним кроком, що НЕ відкочувати.
+   - CONTEXT.md: рішення і причини, додай записи поруч з наявними, нічого не стирай.
+   - Не вигадуй: чого не підтвердив, познач як «не перевірено» і напиши, де шукав.
+2. Покажи diff обох файлів.
+3. Наприкінці дай короткий промпт для нового чату: «Спершу прочитай HANDOFF.md, потім CONTEXT.md», плюс один рядок, з якого кроку продовжити.`
+
 const COLOR = { ok: '#30A46C', warn: '#E09A1E', hot: '#FF1F1F' } as const
 
 /**
  * HUD: one line above the prompt: context fill and rate-limit windows (cost and the prompt-cache countdown are
  * left out so the five buttons fit a narrow window; `/hud` still reports them), then the buttons (handoff,
  * Compact, Clear, Progress), and /hud with the figures as text
- * (VS Code does not draw the band). The handoff and Progress buttons run commands that other mods register
- * (`handoff`, `progress`); a missing mod just makes its button do nothing. Compact and Clear ask first (confirm /
+ * (VS Code does not draw the band). The Handoff button fills the prompt box itself (no command runs); the Progress
+ * button runs a command another mod registers (`progress`); a missing mod just makes it do nothing. Compact and Clear ask first (confirm /
  * cancel) and then run the real command: it is done here because the engine refuses `command.run` from inside a
  * `command.run` hook, so a command of another mod could not do it.
  * The band stacks with other mods' bands: the hook asks the hooks beneath (`next`) first
@@ -151,6 +162,25 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const { Box, Text, Button } = $.ui.resolve(e)
     const run = (command: string) => () => void $.command.run({ command }).catch(() => undefined)
+    // fills the box (after a draft the person already typed, instead of over it); where it cannot be filled, copies the text
+    const fillHandoff = () =>
+      void (async () => {
+        const draft = await $.prompt.read().catch(() => ({ text: '' }))
+        const hasDraft = String(draft?.text ?? '').trim() !== ''
+        const filled = await $.prompt
+          .fill({ text: hasDraft ? `\n\n${HANDOFF_PROMPT}` : HANDOFF_PROMPT, mode: hasDraft ? 'append' : 'replace' })
+          .catch(() => ({ isFilled: false }))
+
+        if (filled.isFilled) {
+          $.ui.toast(hasDraft ? 'Промпт додано після твого тексту в полі вводу. Перевір і натисни Enter.' : 'Промпт у полі вводу. Перевір і натисни Enter.')
+
+          return
+        }
+
+        const copied = await $.ui.copy({ text: HANDOFF_PROMPT }).catch(() => ({ isCopied: false }))
+
+        $.ui.toast(copied.isCopied ? 'Поле вводу зараз не заповнити: промпт скопійовано, встав його сам.' : 'Поле вводу зараз не заповнити.')
+      })()
     const confirmRun = (command: 'compact' | 'clear') => () =>
       void (async () => {
         const answer = await $.ui.ask(ASK[command]!, CHOICES).catch(() => CHOICES[1])
@@ -196,7 +226,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
           {parts.flatMap((p, i) => (i === 0 ? [p] : [dot(String(i)), p]))}
-          <Button key="b-handoff" label="Handoff" onPress={run('handoff')} />
+          <Button key="b-handoff" label="Handoff" onPress={fillHandoff} />
           <Button key="b-compact" label="Compact" onPress={confirmRun('compact')} />
           <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
           <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
