@@ -1,6 +1,6 @@
 # plan-progress 0.7.6-qa.11 — что сделано (для другого чата)
 
-Дата: 07.10.2026. Рабочая копия: `~/Desktop/СLAUDE files /mods/plan-progress/` (в `~/Desktop/MODS` попадает только через rsync, см. «Доставка»).
+Дата: 07.10.2026. Рабочая копия: `~/Desktop/MODS/plan-progress/` (с 08.10.2026 единственная; раньше была `~/Desktop/СLAUDE files /mods/plan-progress/` и попадала в `MODS` через rsync).
 
 ## Зачем
 Живая проверка полос показала три проблемы:
