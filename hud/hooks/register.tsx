@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 
 import type { Limit } from '../types'
 
-import { bandLabel, cacheLeft, countdown, isReset, limitLabel, money, report, tone, untilReset } from './format'
+import { bandLabel, cacheLeft, isReset, limitLabel, report, tone, untilReset } from './format'
 
 const limits = atom({ plugin: 'hud', key: 'limits' } as const, [])
 const usd = atom({ plugin: 'hud', key: 'usd' } as const, null)
@@ -22,8 +22,9 @@ const CHOICES = ['Підтвердити', 'Скасувати']
 const COLOR = { ok: '#30A46C', warn: '#E09A1E', hot: '#FF1F1F' } as const
 
 /**
- * HUD: one line above the prompt: context fill, rate-limit windows, session cost and the prompt-cache
- * countdown, then the buttons (handoff, Compact, Clear, Progress), and /hud with the same figures as text
+ * HUD: one line above the prompt: context fill and rate-limit windows (cost and the prompt-cache countdown are
+ * left out so the five buttons fit a narrow window; `/hud` still reports them), then the buttons (handoff,
+ * Compact, Clear, Progress), and /hud with the figures as text
  * (VS Code does not draw the band). The handoff and Progress buttons run commands that other mods register
  * (`handoff`, `progress`); a missing mod just makes its button do nothing. Compact and Clear ask first (confirm /
  * cancel) and then run the real command: it is done here because the engine refuses `command.run` from inside a
@@ -140,8 +141,6 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
     const list = await read($, limits)
-    const cost = (await read($, usd)) ?? 0
-    const reply = await read($, lastReplyAt)
     const fill = await read($, ctx)
     const times = await read($, showTimes)
 
@@ -150,7 +149,6 @@ export const register: Register = (on, options) => {
     await read($, tick)
 
     const now = await $.clock.now()
-    const left = cacheLeft(reply, ttl, now)
     const { Box, Text, Button } = $.ui.resolve(e)
     const run = (command: string) => () => void $.command.run({ command }).catch(() => undefined)
     const confirmRun = (command: 'compact' | 'clear') => () =>
@@ -192,11 +190,6 @@ export const register: Register = (on, options) => {
               <Button key="b-times" label={times ? '%' : '⏱'} onPress={() => void update($, showTimes, v => !v)} />
             </Box>,
           ]),
-      <Text key="cost">{money(cost)}</Text>,
-      <Text key="cache">
-        <Text dimColor>кеш </Text>
-        <Text dimColor={left === null || left === 0}>{left === null ? '—' : left === 0 ? 'вийшов' : countdown(left)}</Text>
-      </Text>,
     ]
 
     return (

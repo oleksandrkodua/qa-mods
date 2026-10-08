@@ -59,7 +59,7 @@ describe('hud', () => {
     expect(text).toContain('≈ 1:00:00')
   })
 
-  test('the band shows limits, cost and the cache countdown on terminal and desktop', async ($, on) => {
+  test('the band shows the limits but not cost or the cache countdown (they would push a button to a third row)', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
     stub(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -70,8 +70,8 @@ describe('hud', () => {
 
       expect(await ui.find({ type: 'Text', text: /14%/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /83%/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /\$0\.10/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /1:00:00/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /\$0\.10/ })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /1:00:00/ })).toBeUndefined()
       await ui.unmount()
     }
   })
@@ -114,7 +114,7 @@ describe('hud', () => {
     await ui.unmount()
   })
 
-  test('one line: context, limits, cost, cache; then the four buttons that run other mods\' commands', async ($, on) => {
+  test('one line: context, limits; then the four buttons that run other mods\' commands', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
     stub(on)
     const ran: string[] = []
@@ -171,17 +171,16 @@ describe('hud', () => {
     await ui.unmount()
   })
 
-  test('before the first measurement the band already shows the session cost and an empty cache', async ($, on) => {
+  test('before the first measurement the band shows the context and the buttons, no cost or cache', async ($, on) => {
     mock.clock(on)
     stub(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
     const ui = await $.ui.mount({ plugin: 'hud', surface: 'terminal', ...BAND })
 
-    expect(await ui.find({ type: 'Text', text: /\$0\.00/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /\$0\.00/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /кеш/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /1:00:00/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /Контекст 0%/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\$0\.00/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /кеш/ })).toBeUndefined()
     await ui.unmount()
   })
 
