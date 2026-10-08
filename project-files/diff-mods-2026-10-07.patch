@@ -1,0 +1,3059 @@
+diff --git oldblast-radius/.claude-plugin/plugin.json new/blast-radius/.claude-plugin/plugin.json
+index 9095682..668b9c5 100644
+--- oldblast-radius/.claude-plugin/plugin.json
++++ new/blast-radius/.claude-plugin/plugin.json
+@@ -1,17 +1,8 @@
+ {
+   "name": "blast-radius",
+-  "version": "0.3.2",
+-  "description": "Before a risky Bash command runs, says what it will touch: a short label in the transcript, the details at the end of the command's output (inside the tool row) and under /blast. Static analysis only, nothing is executed to preview.",
++  "version": "0.5.0",
++  "description": "Before a risky Bash command runs, says what it will touch. A plain deletion is judged by git: files outside git or tracked and clean get only a short label, a Ukrainian dialog (with the rm line, the number of files and a typed 'Other' decision) is for uncommitted changes, the home folder, more than 20 files and other hard risks. Static analysis plus read-only git, nothing is executed to preview.",
+   "author": {
+     "name": "noaod"
+-  },
+-  "userConfig": {
+-    "appendToOutput": {
+-      "type": "boolean",
+-      "title": "Append the report to the command output",
+-      "description": "On: the details sit at the end of the command's output, so they show inside the expandable tool row (the model reads them too). Off: only the short label and /blast.",
+-      "required": false,
+-      "default": true
+-    }
+   }
+-}
+\ No newline at end of file
++}
+diff --git oldblast-radius/.in_use/96347 newblast-radius/.in_use/96347
+deleted file mode 100644
+index 0ca904d..0000000
+--- oldblast-radius/.in_use/96347
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96347,"procStart":"Tue Oct  6 21:24:18 2026"}
+\ No newline at end of file
+diff --git oldblast-radius/.in_use/96679 newblast-radius/.in_use/96679
+deleted file mode 100644
+index 15b1f95..0000000
+--- oldblast-radius/.in_use/96679
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96679,"procStart":"Tue Oct  6 21:26:25 2026"}
+\ No newline at end of file
+diff --git oldblast-radius/.in_use/97163 newblast-radius/.in_use/97163
+deleted file mode 100644
+index 28ecc03..0000000
+--- oldblast-radius/.in_use/97163
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":97163,"procStart":"Tue Oct  6 21:28:31 2026"}
+\ No newline at end of file
+diff --git oldblast-radius/.orphaned_at newblast-radius/.orphaned_at
+deleted file mode 100644
+index a8f3ab7..0000000
+--- oldblast-radius/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791324081621
+\ No newline at end of file
+diff --git oldblast-radius/hooks/analyze.ts new/blast-radius/hooks/analyze.ts
+index 8d1172a..a14f18c 100644
+--- oldblast-radius/hooks/analyze.ts
++++ new/blast-radius/hooks/analyze.ts
+@@ -7,6 +7,12 @@ export interface Analysis {
+   paths: string[]
+   /** true when the command acts on the git working tree */
+   git: boolean
++  /** the first segment that raised the risk (what the dialog shows instead of the whole command line) */
++  segment: string
++  /** true when something other than plain file deletion is high risk (sudo, dd, git reset --hard ...): always asked */
++  hard: boolean
++  /** every rm / unlink / shred: where it runs and what it names, so the mod can look at git state and counts */
++  deletes: { cwd: string; targets: string[]; recursive: boolean }[]
+ }
+ 
+ /** Split a command line into words, honouring single and double quotes. */
+@@ -78,8 +84,13 @@ const maskQuotes = (s: string) => s.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""')
+ 
+ const RANK: Record<Risk, number> = { none: 0, medium: 1, high: 2 }
+ 
+-function bump(a: Analysis, risk: Risk, reason: string) {
+-  if (RANK[risk] > RANK[a.risk]) a.risk = risk
++function bump(a: Analysis, risk: Risk, reason: string, seg = '', isDelete = false) {
++  if (RANK[risk] > RANK[a.risk]) {
++    a.risk = risk
++    a.segment = seg
++  }
++
++  if (risk === 'high' && !isDelete) a.hard = true
+   if (!a.reasons.includes(reason)) a.reasons.push(reason)
+ }
+ 
+@@ -94,14 +105,18 @@ const operands = (args: string[]) => args.filter(w => !w.startsWith('-'))
+ 
+ export function analyze(raw: string): Analysis {
+   const cmd = stripHeredocs(raw)
+-  const a: Analysis = { risk: 'none', reasons: [], paths: [], git: false }
++  const a: Analysis = { risk: 'none', reasons: [], paths: [], git: false, segment: '', hard: false, deletes: [] }
++  // `cd dir && rm x`: relative paths belong to the directory the last cd moved to
++  let cwd = ''
++  const at = (p: string) => (cwd && !/^([/~]|\$)/.test(p) ? `${cwd.replace(/\/$/, '')}/${p}` : p)
++  const push = (...p: string[]) => a.paths.push(...p.map(at))
+ 
+   if (/\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z|)sh\b/.test(cmd)) {
+-    bump(a, 'high', 'pipes a download into a shell')
++    bump(a, 'high', 'pipes a download into a shell', cmd)
+   }
+ 
+   for (const seg of segments(cmd)) {
+-    let w = words(seg)
++    let w = words(seg.replace(/^\(+\s*/, ''))
+ 
+     while (w[0] && (/^\w+=/.test(w[0]) || w[0] === 'env')) w = w.slice(1)
+ 
+@@ -109,13 +124,18 @@ export function analyze(raw: string): Analysis {
+     let args = w.slice(1)
+ 
+     if (bin === 'sudo') {
+-      bump(a, 'high', 'runs with sudo')
++      bump(a, 'high', 'runs with sudo', seg)
+       bin = args[0]
+       args = args.slice(1)
+     }
+ 
+     if (!bin) continue
+ 
++    if (bin === 'cd' && args[0] && !args[0].startsWith('-')) {
++      cwd = at(args[0])
++      continue
++    }
++
+     switch (bin) {
+       case 'rm':
+       case 'rmdir':
+@@ -129,15 +149,18 @@ export function analyze(raw: string): Analysis {
+           a,
+           bin === 'rmdir' ? 'medium' : 'high',
+           `deletes files permanently${recursive ? ', recursively' : ''}${force ? ', without prompts' : ''}`,
++          seg,
++          true,
+         )
+ 
+-        a.paths.push(...operands(args))
++        push(...operands(args))
++        a.deletes.push({ cwd, targets: operands(args), recursive })
+         break
+       }
+       case 'mv':
+       case 'cp': {
+-        bump(a, 'medium', `${bin} can overwrite existing files`)
+-        a.paths.push(...operands(args).slice(-1))
++        bump(a, 'medium', `${bin} can overwrite existing files`, seg)
++        push(...operands(args).slice(-1))
+         break
+       }
+       case 'chmod':
+@@ -145,21 +168,21 @@ export function analyze(raw: string): Analysis {
+       case 'chgrp': {
+         const rec = hasFlag(args, 'R', '--recursive')
+ 
+-        bump(a, rec ? 'high' : 'medium', `${bin} changes permissions/ownership${rec ? ' recursively' : ''}`)
+-        a.paths.push(...operands(args).slice(1))
++        bump(a, rec ? 'high' : 'medium', `${bin} changes permissions/ownership${rec ? ' recursively' : ''}`, seg)
++        push(...operands(args).slice(1))
+         break
+       }
+       case 'dd':
+       case 'mkfs':
+       case 'diskutil':
+       case 'truncate': {
+-        bump(a, 'high', `${bin} can destroy data at block/file level`)
++        bump(a, 'high', `${bin} can destroy data at block/file level`, seg)
+         break
+       }
+       case 'find': {
+         if (args.includes('-delete') || args.includes('-exec')) {
+-          bump(a, 'high', 'find with -delete/-exec acts on every match')
+-          a.paths.push(args[0] && !args[0].startsWith('-') ? args[0] : '.')
++          bump(a, 'high', 'find with -delete/-exec acts on every match', seg)
++          push(args[0] && !args[0].startsWith('-') ? args[0] : '.')
+         }
+ 
+         break
+@@ -167,7 +190,7 @@ export function analyze(raw: string): Analysis {
+       case 'sed':
+       case 'perl': {
+         if (hasFlag(args, 'i')) {
+-          bump(a, 'medium', `${bin} -i edits files in place`)
++          bump(a, 'medium', `${bin} -i edits files in place`, seg)
+ 
+           // the script is the first operand unless -e/-f give it; the BSD `-i ''` suffix is an empty word
+           const files: string[] = []
+@@ -182,7 +205,7 @@ export function analyze(raw: string): Analysis {
+             } else if (!w.startsWith('-') && w !== '') files.push(w)
+           }
+ 
+-          a.paths.push(...(hasScript ? files : files.slice(1)))
++          push(...(hasScript ? files : files.slice(1)))
+         }
+ 
+         break
+@@ -192,22 +215,22 @@ export function analyze(raw: string): Analysis {
+         const rest = args.slice(args.indexOf(sub ?? '') + 1)
+ 
+         if (sub === 'reset' && rest.includes('--hard')) {
+-          bump(a, 'high', 'git reset --hard discards uncommitted changes')
++          bump(a, 'high', 'git reset --hard discards uncommitted changes', seg)
+           a.git = true
+         } else if (sub === 'clean' && (hasFlag(rest, 'f', '--force') || rest.includes('-fd'))) {
+-          bump(a, 'high', 'git clean deletes untracked files')
++          bump(a, 'high', 'git clean deletes untracked files', seg)
+           a.git = true
+         } else if (
+           (sub === 'checkout' && (rest.includes('--') || rest.includes('.'))) ||
+           (sub === 'restore' && !rest.includes('--staged'))
+         ) {
+-          bump(a, 'high', `git ${sub} overwrites working-tree files`)
++          bump(a, 'high', `git ${sub} overwrites working-tree files`, seg)
+           a.git = true
+         // git push: the remote-gate mod asks (remote, branch, outgoing commits); one dialog per push
+         } else if (sub === 'branch' && rest.includes('-D')) {
+-          bump(a, 'high', 'git branch -D deletes a branch even if unmerged')
++          bump(a, 'high', 'git branch -D deletes a branch even if unmerged', seg)
+         } else if (sub === 'stash' && (rest[0] === 'drop' || rest[0] === 'clear')) {
+-          bump(a, 'medium', 'drops stashed work')
++          bump(a, 'medium', 'drops stashed work', seg)
+         }
+ 
+         break
+@@ -220,11 +243,14 @@ export function analyze(raw: string): Analysis {
+   const redirect = /(^|[^>&\d=-])>(?!=)\s*([^\s>&|;"']+)/.exec(maskQuotes(cmd))
+ 
+   if (redirect && !redirect[2]!.startsWith('/dev/')) {
+-    bump(a, 'medium', `redirect truncates ${redirect[2]}`)
+-    a.paths.push(redirect[2]!)
++    bump(a, 'medium', `redirect truncates ${redirect[2]}`, cmd)
++    push(redirect[2]!)
+   }
+ 
+-  a.paths = [...new Set(a.paths)]
++  // `(cd x && rm y)`: the closing bracket of the subshell is not part of the file name (a name like `a (1)` keeps its own pair)
++  const unwrap = (x: string) => (x.split(')').length > x.split('(').length ? x.replace(/\)+$/, '') : x)
++
++  a.paths = [...new Set(a.paths.map(unwrap))]
+ 
+   return a
+ }
+diff --git old/blast-radius/hooks/decide.ts new/blast-radius/hooks/decide.ts
+new file mode 100644
+index 0000000..322ec3b
+--- /dev/null
++++ new/blast-radius/hooks/decide.ts
+@@ -0,0 +1,104 @@
++/** What a deletion touches, read from disk and git (read-only). */
++export interface Facts {
++  count: number
++  /** how many of them git tracks */
++  tracked: number
++  /** tracked files with uncommitted changes (staged or not) */
++  dirty: number
++  /** a target is the home folder (or something above it) */
++  isHome: boolean
++}
++
++export type Level = 'dialog' | 'medium' | 'low'
++
++/** Where the line is: a dialog only for work that cannot come back from git. */
++export const MANY = 20
++
++export function parseFacts(stdout: string): Pick<Facts, 'count' | 'tracked' | 'dirty'> {
++  const num = (key: string) => Number(new RegExp(`^${key} (\\d+)`, 'm').exec(stdout)?.[1] ?? 0)
++
++  return { count: num('COUNT'), tracked: num('TRACKED'), dirty: num('DIRTY') }
++}
++
++/** `~`, `$HOME`, `~/*`, `/Users/me/`, `/Users`, `/`: deleting this is deleting a life. */
++export function isHomeTarget(target: string, home: string): boolean {
++  const t = target
++    .replaceAll('$HOME', home)
++    .replace(/^~(?=\/|$)/, home)
++    .replace(/\/(\.\*|\*|\.)?$/, '')
++    .replace(/\/+$/, '')
++
++  if (t === '' || t === home.replace(/\/+$/, '')) return true
++
++  const parent = home.replace(/\/[^/]*\/?$/, '')
++
++  return t === parent
++}
++
++export function levelOf(hard: boolean, facts: Facts): Level {
++  if (hard || facts.dirty > 0 || facts.isHome || facts.count > MANY) return 'dialog'
++
++  return facts.tracked > 0 ? 'medium' : 'low'
++}
++
++/** 1 файл, 2 файли, 5 файлів */
++export function plural(n: number, forms: [string, string, string]): string {
++  const m10 = n % 10
++  const m100 = n % 100
++  const form = m10 === 1 && m100 !== 11 ? forms[0] : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? forms[1] : forms[2]
++
++  return `${n} ${form}`
++}
++
++const short = (s: string, max: number) => {
++  const t = s.replace(/\s+/g, ' ').trim()
++
++  return t.length > max ? `${t.slice(0, max - 1)}…` : t
++}
++
++/** The state of the files in a few words, for the dialog and the line in the chat. */
++export function stateWords(f: Facts): string {
++  const parts: string[] = []
++
++  if (f.isHome) parts.push('це домашня папка')
++  if (f.dirty > 0) parts.push(`незакомічених змін: ${f.dirty}`)
++  if (f.count > MANY) parts.push('багато файлів')
++  if (parts.length === 0) parts.push(f.tracked > 0 ? 'усі в git, без змін' : 'поза git')
++
++  return parts.join(', ')
++}
++
++export const deleteTitle = (f: Facts) => `Видалення ${plural(f.count, ['файлу', 'файлів', 'файлів'])}`
++
++/** One short question: what, how many, in what state, and the risky command only. */
++export function deleteQuestion(f: Facts, segment: string): string {
++  return `${deleteTitle(f)} (${stateWords(f)}). Команда: ${short(segment, 120)}. Виконати?`
++}
++
++const REASONS: Record<string, string> = {
++  'runs with sudo': 'запуск із sudo',
++  'pipes a download into a shell': 'завантаження передається прямо в shell',
++  'git reset --hard discards uncommitted changes': 'git reset --hard відкидає незакомічені зміни',
++  'git clean deletes untracked files': 'git clean видаляє файли, яких немає в git',
++  'git branch -D deletes a branch even if unmerged': 'git branch -D видаляє гілку, навіть незлиту',
++  'find with -delete/-exec acts on every match': 'find з -delete/-exec зачіпає кожен збіг',
++}
++
++export const reasonUk = (r: string) =>
++  REASONS[r] ?? (/^git (checkout|restore) overwrites/.test(r) ? 'git перезаписує файли робочої копії' : /changes permissions\/ownership recursively/.test(r) ? 'рекурсивна зміна прав або власника' : /can destroy data/.test(r) ? 'може знищити дані на рівні диска або файлу' : r)
++
++export function hardQuestion(reasons: string[], segment: string): string {
++  return `Ризик: ${reasons.map(reasonUk).join('; ')}. Команда: ${short(segment, 120)}. Виконати?`
++}
++
++export const CHOICES = ['Виконати', 'Скасувати'] as const
++
++/** What the answer means: run, cancel, or the user's own decision typed under Other. */
++export function readAnswer(answer: unknown): { kind: 'run' } | { kind: 'cancel' } | { kind: 'custom'; text: string } {
++  const text = String(answer ?? '').trim()
++
++  if (text === CHOICES[0]) return { kind: 'run' }
++  if (text === '' || text === CHOICES[1]) return { kind: 'cancel' }
++
++  return { kind: 'custom', text }
++}
+diff --git oldblast-radius/hooks/register.tsx new/blast-radius/hooks/register.tsx
+index 8ddfc7e..93831f4 100644
+--- oldblast-radius/hooks/register.tsx
++++ new/blast-radius/hooks/register.tsx
+@@ -1,6 +1,8 @@
+ import type { Register } from 'claude-code'
+ 
+ import { analyze } from './analyze'
++import { CHOICES, deleteQuestion, deleteTitle, hardQuestion, isHomeTarget, levelOf, parseFacts, reasonUk, readAnswer, stateWords } from './decide'
++import type { Facts, Level } from './decide'
+ 
+ const MAX_PATHS = 5
+ const MAX_LISTED = 8
+@@ -13,11 +15,9 @@ const MAX_LISTED = 8
+  * The transcript gets one short label. The details are appended to the end of the command's
+  * own output (the part inside the tool row that the person opens with its chevron) and printed
+  * by /blast. The desktop app draws that row itself, so a render hook on the row cannot reach
+- * it; the output is the one place that works. The model reads the appended block too
+- * (`appendToOutput: false` turns that off and leaves the label and /blast).
++ * it; the output is the one place that works. The model reads the appended block too.
+  */
+-export const register: Register = (on, options) => {
+-  const append = options?.appendToOutput !== false
++export const register: Register = on => {
+   // /blast: the one-paragraph report of the last risky command
+   let last = ''
+ 
+@@ -38,13 +38,14 @@ export const register: Register = (on, options) => {
+       const a = analyze(String(e.command ?? ''))
+ 
+       if (a.risk !== 'none') {
++        // 1. what it will touch (read-only preview; globs are expanded by bash, never eval'd)
+         const touched: string[] = []
+ 
+         for (const p of a.paths.slice(0, MAX_PATHS)) {
+           const r = await $.process.run([
+             'bash',
+             '-c',
+-            `shopt -s nullglob; set -- $1; echo "$#"; printf "%s\\n" "$@" | head -n ${MAX_LISTED}`,
++            `shopt -s nullglob; IFS=$'\\n'; set -- $1; echo "$#"; printf "%s\\n" "$@" | head -n ${MAX_LISTED}`,
+             '_',
+             p,
+           ])
+@@ -70,28 +71,66 @@ export const register: Register = (on, options) => {
+           touched.push(`git: ${n} file(s) with uncommitted changes at stake`)
+         }
+ 
+-        const cmd = String(e.command ?? '').replace(/\s+/g, ' ').trim()
+-        const shown = cmd.length > 160 ? `${cmd.slice(0, 160)}…` : cmd
+-        const label = `⚠ Blast Radius [${a.risk.toUpperCase()}]`
+-        const head = `${label}: ${a.reasons.join('; ')}.`
+-        const willTouch = `Will touch: ${touched.length ? touched.join(' | ') : 'nothing found on disk'}`
++        // 2. how bad it is: a plain deletion is judged by what git knows about the files, anything else harder is always asked
++        const home = String((await $.env.get('HOME').catch(() => '')) ?? '')
++        const segment = a.segment || String(e.command ?? '')
++        let level: Level = a.risk === 'high' ? 'dialog' : 'medium'
++        let title = a.reasons.map(reasonUk).join('; ')
++        let question = hardQuestion(a.reasons, segment)
++
++        if (a.risk === 'high' && !a.hard && a.deletes.length > 0) {
++          const facts: Facts = { count: 0, tracked: 0, dirty: 0, isHome: false }
++
++          for (const d of a.deletes) {
++            const targets = d.targets.map(t => t.replaceAll('$HOME', home).replace(/^~(?=\/|$)/, home))
++
++            if (targets.some(t => isHomeTarget(t, home))) facts.isHome = true
++
++            const r = await $.process.run([
++              'bash',
++              '-c',
++              `cd "$1" 2>/dev/null || cd .; shopt -s nullglob; IFS=$'\\n'; set -- $2
++if [ "$#" -eq 0 ]; then echo "COUNT 0"; exit 0; fi
++files=$(for t in "$@"; do if [ -d "$t" ]; then find "$t" -type f 2>/dev/null | head -n 2000; elif [ -e "$t" ] || [ -L "$t" ]; then printf '%s\\n' "$t"; fi; done | head -n 2000)
++echo "COUNT $(printf '%s\\n' "$files" | grep -c .)"
++if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
++  echo "TRACKED $(git ls-files -- "$@" 2>/dev/null | wc -l | tr -d ' ')"
++  echo "DIRTY $(git status --porcelain -uno -- "$@" 2>/dev/null | wc -l | tr -d ' ')"
++fi`,
++              '_',
++              d.cwd,
++              targets.join('\n'),
++            ])
++            const f = parseFacts(String(r.stdout ?? ''))
++
++            facts.count += f.count
++            facts.tracked += f.tracked
++            facts.dirty += f.dirty
++          }
++
++          level = levelOf(false, facts)
++          title = `${deleteTitle(facts)} (${stateWords(facts)})`
++          question = deleteQuestion(facts, segment)
++        }
+ 
+-        // The dialog collapses newlines, so sections are separated by labelled sentences.
+-        const summary = `${head} Command: ${shown} ${willTouch}.`
++        const label = `⚠ Blast Radius [${level === 'dialog' ? 'HIGH' : level === 'medium' ? 'MEDIUM' : 'LOW'}]`
++        const willTouch = `Will touch: ${touched.length ? touched.join(' | ') : 'nothing found on disk'}`
+ 
+-        last = summary
+-        block = [`── ${label} (added by the blast-radius mod, not command output) ──`, a.reasons.join('; '), willTouch].join('\n')
++        last = `${label}: ${title}. Команда: ${segment}. ${willTouch}.`
++        block = [`── ${label} (додано модом blast-radius, це не вивід команди) ──`, title, willTouch].join('\n')
+ 
+         // one short label; everything else is at the end of the tool row's output and under /blast
+         $.ui.log(label)
+ 
+-        if (a.risk === 'high') {
+-          // Panes and logs are not drawn on every surface (VS Code); the ask dialog is.
+-          const answer = await $.ui.ask(`${summary}\n\nRun it?`, ['Run it', 'Cancel']).catch(() => 'Run it')
++        if (level === 'dialog') {
++          // Panes and logs are not drawn on every surface (VS Code); the ask dialog is. "Other" is added by the dialog itself.
++          const answer = readAnswer(await $.ui.ask(question, [...CHOICES]).catch(() => CHOICES[0]))
++
++          if (answer.kind === 'cancel') return { deny: 'Blast Radius: користувач скасував команду після перегляду.' }
+ 
+-          if (answer === 'Cancel') return { deny: 'Blast Radius: cancelled by the user after reviewing what it would touch.' }
+-        } else {
+-          $.ui.toast(head)
++          if (answer.kind === 'custom') {
++            return { deny: `Blast Radius: команду не виконано. Замість «Виконати» чи «Скасувати» користувач дав своє рішення: «${answer.text}». Зроби саме так.` }
++          }
+         }
+       }
+     } catch {
+@@ -100,7 +139,7 @@ export const register: Register = (on, options) => {
+ 
+     const ran = await next(e)
+ 
+-    if (!append || !block || ran.deny !== undefined || ran.isError === true) return ran
++    if (!block || ran.deny !== undefined || ran.isError === true) return ran
+ 
+     const result: any = ran.result
+ 
+diff --git oldblast-radius/tests/analyze.test.mjs new/blast-radius/tests/analyze.test.mjs
+index f99a12d..89908f1 100644
+--- oldblast-radius/tests/analyze.test.mjs
++++ new/blast-radius/tests/analyze.test.mjs
+@@ -58,10 +58,28 @@ test('heredoc fed to a shell is still analysed', () => {
+ test('sed -i: no duplicate reason, script is not a path, BSD empty suffix ignored', () => {
+   const a = analyze("cd x && sed -i '' 's/a/b/' f.txt && sed -i '' '/^x/d' g.txt")
+   assert.deepEqual(a.reasons, ['sed -i edits files in place'])
+-  assert.deepEqual(a.paths, ['f.txt', 'g.txt'])
++  assert.deepEqual(a.paths, ['x/f.txt', 'x/g.txt'])
+   assert.deepEqual(analyze("sed -i -e 's/a/b/' -e 's/c/d/' f.txt").paths, ['f.txt'])
+ })
+ 
+ test('git push is left to remote-gate', () => {
+   assert.equal(analyze('git push --force origin main').risk, 'none')
+ })
++
++test('the closing bracket of a subshell is not part of the path, a name with its own brackets is kept', () => {
++  assert.deepEqual(analyze('(cd tests && rm -f register.mjs look.html)').paths, ['tests/register.mjs', 'tests/look.html'])
++  assert.deepEqual(analyze('rm "report (1).txt"').paths, ['report (1).txt'])
++})
++
++test('cd moves relative paths, the risky segment and the delete list are kept, other high risks are hard', () => {
++  const a = analyze('cd /work/proj && python3 x.py && rm -f a.txt b/c.txt')
++
++  assert.equal(a.risk, 'high')
++  assert.equal(a.hard, false)
++  assert.equal(a.segment, 'rm -f a.txt b/c.txt')
++  assert.deepEqual(a.deletes, [{ cwd: '/work/proj', targets: ['a.txt', 'b/c.txt'], recursive: false }])
++  assert.deepEqual(a.paths, ['/work/proj/a.txt', '/work/proj/b/c.txt'])
++  assert.equal(analyze('rm x && sudo ls').hard, true)
++  assert.equal(analyze('git reset --hard').hard, true)
++  assert.equal(analyze('rm -rf build').hard, false)
++})
+diff --git old/blast-radius/tests/decide.test.mjs new/blast-radius/tests/decide.test.mjs
+new file mode 100644
+index 0000000..788671b
+--- /dev/null
++++ new/blast-radius/tests/decide.test.mjs
+@@ -0,0 +1,46 @@
++import assert from 'node:assert/strict'
++import { test } from 'node:test'
++
++import { MANY, isHomeTarget, levelOf, parseFacts, plural, readAnswer, stateWords } from '../hooks/decide.ts'
++
++const F = (o = {}) => ({ count: 2, tracked: 0, dirty: 0, isHome: false, ...o })
++
++test('parseFacts reads the three counters, missing ones are 0', () => {
++  assert.deepEqual(parseFacts('COUNT 4\nTRACKED 3\nDIRTY 1\n'), { count: 4, tracked: 3, dirty: 1 })
++  assert.deepEqual(parseFacts('COUNT 0'), { count: 0, tracked: 0, dirty: 0 })
++  assert.deepEqual(parseFacts(''), { count: 0, tracked: 0, dirty: 0 })
++})
++
++test('levels: a dialog only for uncommitted changes, home, many files or a hard risk', () => {
++  assert.equal(levelOf(false, F()), 'low')
++  assert.equal(levelOf(false, F({ tracked: 2 })), 'medium')
++  assert.equal(levelOf(false, F({ tracked: 2, dirty: 1 })), 'dialog')
++  assert.equal(levelOf(false, F({ isHome: true })), 'dialog')
++  assert.equal(levelOf(false, F({ count: MANY })), 'low')
++  assert.equal(levelOf(false, F({ count: MANY + 1 })), 'dialog')
++  assert.equal(levelOf(true, F()), 'dialog')
++})
++
++test('home targets', () => {
++  const h = '/Users/x'
++
++  for (const t of ['~', '~/', '~/*', '~/.*', '$HOME', '$HOME/*', '/Users/x', '/Users/x/', '/Users', '/', '/*']) assert.equal(isHomeTarget(t, h), true, t)
++  for (const t of ['~/Desktop', '/Users/x/Desktop/a', 'build', './x', '/tmp/x']) assert.equal(isHomeTarget(t, h), false, t)
++})
++
++test('answers: the two choices, a skipped dialog, and the typed decision', () => {
++  assert.deepEqual(readAnswer('Виконати'), { kind: 'run' })
++  assert.deepEqual(readAnswer('Скасувати'), { kind: 'cancel' })
++  assert.deepEqual(readAnswer(''), { kind: 'cancel' })
++  assert.deepEqual(readAnswer(undefined), { kind: 'cancel' })
++  assert.deepEqual(readAnswer('  видали лише перший '), { kind: 'custom', text: 'видали лише перший' })
++})
++
++test('Ukrainian plural and the state words', () => {
++  const f = ['файл', 'файли', 'файлів']
++
++  assert.deepEqual([1, 2, 5, 11, 12, 21, 22, 25].map(n => plural(n, f)), ['1 файл', '2 файли', '5 файлів', '11 файлів', '12 файлів', '21 файл', '22 файли', '25 файлів'])
++  assert.equal(stateWords(F()), 'поза git')
++  assert.equal(stateWords(F({ tracked: 2 })), 'усі в git, без змін')
++  assert.equal(stateWords(F({ tracked: 2, dirty: 2, count: 30 })), 'незакомічених змін: 2, багато файлів')
++})
+diff --git oldblast-radius/tests/register.test.ts new/blast-radius/tests/register.test.ts
+index ec941dd..fb8cb74 100644
+--- oldblast-radius/tests/register.test.ts
++++ new/blast-radius/tests/register.test.ts
+@@ -1,42 +1,131 @@
+ import { describe, expect, test } from 'claude-code/testing'
+ 
+-const stubs = (on: any, logs: string[] = []) => {
++type Facts = { count: number; tracked: number; dirty: number }
++
++// process.run answers two kinds of scripts: the path preview ("3 a b c") and the git facts (COUNT / TRACKED / DIRTY)
++const stubs = (on: any, logs: string[] = [], facts: Facts = { count: 2, tracked: 0, dirty: 0 }, asked: string[] = [], answer: string | Error = 'Виконати') => {
+   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
+   on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
+-  on('process.run', () => ({ value: { exitCode: 0, stdout: '3\na\nb\nc\n', stderr: '' } }))
++  on('env.get', () => ({ value: '/Users/x' }))
++  on('process.run', ($: any, e: any) => ({
++    value: {
++      exitCode: 0,
++      stdout: String(e.argv[2] ?? '').includes('COUNT') ? `COUNT ${facts.count}\nTRACKED ${facts.tracked}\nDIRTY ${facts.dirty}\n` : '3\na\nb\nc\n',
++      stderr: '',
++    },
++  }))
+   on('ui.log', ($: any, e: any, next: any) => (logs.push(e.text), next(e)))
+   on('ui.toast', () => ({ value: undefined }))
++  on('tool.call', { tool: 'AskUserQuestion' }, ($: any, e: any) => {
++    if (answer instanceof Error) throw answer
++
++    const q = String(e.questions[0].question)
++
++    asked.push(q)
++
++    return { result: { questions: e.questions, answers: { [q]: answer } } }
++  })
+ }
+ 
++const bash = ($: any, command: string) => $.tool.call({ tool: 'Bash', command })
++
+ describe('blast-radius', () => {
+-  test('rm -rf logs one short label and still runs the command', async ($, on) => {
++  test('files outside git: no dialog, one LOW label, the command runs', async ($, on) => {
+     const logs: string[] = []
++    const asked: string[] = []
+     let ran = false
+-    stubs(on, logs)
+-    on('tool.call', () => ((ran = true), { result: { stdout: '', stderr: '' } }))
+-
+-    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
++    stubs(on, logs, { count: 2, tracked: 0, dirty: 0 }, asked)
++    on('tool.call', { tool: 'Bash' }, () => ((ran = true), { result: { stdout: '', stderr: '' } }))
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+ 
+-    const out = await $.tool.call({ tool: 'Bash', command: 'rm -rf build' })
++    const out = await bash($, 'cd tests && rm -f register.mjs look.html')
+ 
+     expect(out.deny).toBeUndefined()
+     expect(ran).toBe(true)
+-    // the transcript line is only the label; the command and the paths are in the tool output and under /blast
+-    expect(logs).toEqual(['⚠ Blast Radius [HIGH]'])
++    expect(asked).toEqual([])
++    expect(logs).toEqual(['⚠ Blast Radius [LOW]'])
+ 
+     const { text } = await $.command.run({ command: 'blast', args: '', origin: { kind: 'composer' } })
+ 
+-    expect(text).toContain('Command: rm -rf build')
+-    expect(text).toContain('build → 3 path(s)')
++    expect(text).toContain('Видалення 2 файлів (поза git)')
++    expect(text).toContain('Команда: rm -f register.mjs look.html')
++  })
++
++  test('tracked files without changes: a MEDIUM label, still no dialog', async ($, on) => {
++    const logs: string[] = []
++    const asked: string[] = []
++    stubs(on, logs, { count: 3, tracked: 3, dirty: 0 }, asked)
++    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '' } }))
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++
++    await bash($, 'rm a b c')
++
++    expect(asked).toEqual([])
++    expect(logs).toEqual(['⚠ Blast Radius [MEDIUM]'])
++  })
++
++  test('uncommitted changes: a short Ukrainian dialog with the rm line only; Виконати runs it', async ($, on) => {
++    const logs: string[] = []
++    const asked: string[] = []
++    let ran = false
++    stubs(on, logs, { count: 3, tracked: 3, dirty: 1 }, asked, 'Виконати')
++    on('tool.call', { tool: 'Bash' }, () => ((ran = true), { result: { stdout: '', stderr: '' } }))
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++
++    const out = await bash($, 'python3 - <<EOF\nbig script\nEOF\nrm a b c')
++
++    expect(asked).toEqual(['Видалення 3 файлів (незакомічених змін: 1). Команда: rm a b c. Виконати?'])
++    expect(logs).toEqual(['⚠ Blast Radius [HIGH]'])
++    expect(out.deny).toBeUndefined()
++    expect(ran).toBe(true)
++  })
++
++  test('Скасувати and a skipped dialog both stop the command', async ($, on) => {
++    const asked: string[] = []
++    let ran = false
++    stubs(on, [], { count: 3, tracked: 3, dirty: 1 }, asked, 'Скасувати')
++    on('tool.call', { tool: 'Bash' }, () => ((ran = true), { result: { stdout: '', stderr: '' } }))
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++
++    const out = await bash($, 'rm a b c')
++
++    expect(String(out.deny)).toContain('скасував')
++    expect(ran).toBe(false)
++  })
++
++  test('Other: the typed decision replaces the command and is handed to Claude', async ($, on) => {
++    let ran = false
++    stubs(on, [], { count: 3, tracked: 3, dirty: 1 }, [], 'видали тільки перший файл')
++    on('tool.call', { tool: 'Bash' }, () => ((ran = true), { result: { stdout: '', stderr: '' } }))
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++
++    const out = await bash($, 'rm a b c')
++
++    expect(ran).toBe(false)
++    expect(String(out.deny)).toContain('видали тільки перший файл')
++    expect(String(out.deny)).toContain('своє рішення')
++  })
++
++  test('more than 20 files and other hard risks always ask', async ($, on) => {
++    const asked: string[] = []
++    stubs(on, [], { count: 25, tracked: 0, dirty: 0 }, asked)
++    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '' } }))
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++
++    await bash($, 'rm -rf cache')
++    await bash($, 'sudo ls')
++
++    expect(asked).toHaveLength(2)
++    expect(asked[0]).toContain('багато файлів')
++    expect(asked[1]).toContain('запуск із sudo')
+   })
+ 
+   test('the report is appended to the end of that command\'s own output', async ($, on) => {
+     stubs(on)
+-    on('tool.call', () => ({ result: { stdout: 'done\n', stderr: '' } }))
+-
++    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'done\n', stderr: '' } }))
+     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+ 
+-    const out: any = await $.tool.call({ tool: 'Bash', command: 'cp a.txt b.txt' })
++    const out: any = await bash($, 'cp a.txt b.txt')
+ 
+     expect(out.result.stdout.startsWith('done\n')).toBe(true)
+     expect(out.result.stdout).toContain('⚠ Blast Radius [MEDIUM]')
+@@ -45,23 +134,12 @@ describe('blast-radius', () => {
+     expect(out.result.stderr).toBe('')
+   })
+ 
+-  test('appendToOutput: false leaves the output alone', { options: { appendToOutput: false } }, async ($, on) => {
+-    stubs(on)
+-    on('tool.call', () => ({ result: { stdout: 'done\n', stderr: '' } }))
+-
+-    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+-
+-    const out: any = await $.tool.call({ tool: 'Bash', command: 'cp a.txt b.txt' })
+-
+-    expect(out.result.stdout).toBe('done\n')
+-  })
+-
+   test('a harmless command logs nothing and its output is untouched', async ($, on) => {
+     const logs: string[] = []
+     stubs(on, logs)
+-    on('tool.call', () => ({ result: { stdout: 'x', stderr: '' } }))
++    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'x', stderr: '' } }))
+ 
+-    const out: any = await $.tool.call({ tool: 'Bash', command: 'ls -la' })
++    const out: any = await bash($, 'ls -la')
+ 
+     expect(logs).toEqual([])
+     expect(out.result.stdout).toBe('x')
+diff --git oldblast-radius/tsconfig.json newblast-radius/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldblast-radius/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git oldhud/.claude-plugin/plugin.json new/hud/.claude-plugin/plugin.json
+index 5a31574..d4202fc 100644
+--- oldhud/.claude-plugin/plugin.json
++++ new/hud/.claude-plugin/plugin.json
+@@ -1,10 +1,10 @@
+ {
+   "name": "hud",
+-  "version": "0.3.0",
++  "version": "0.5.0",
+   "author": {
+     "name": "noaod"
+   },
+-  "description": "Rate-limit windows and session cost above the prompt, a prompt-cache countdown in the same band, and /hud with the same figures as text.",
++  "description": "One line above the prompt: context fill, rate-limit windows, session cost, prompt-cache countdown, and the buttons handoff, Compact, Clear and Progress; /hud with the same figures as text.",
+   "types": "./types/index.d.ts",
+   "userConfig": {
+     "cacheTtlMinutes": {
+@@ -28,12 +28,19 @@
+       "required": false,
+       "default": 85
+     },
+-    "refreshAtStart": {
+-      "type": "boolean",
+-      "title": "Fetch live limits at session start",
+-      "description": "Send one 1-token Haiku request at the start so the rate-limit windows are live from the first seconds. Off: show the windows saved by the previous session until the first reply.",
++    "ctxWarnPercent": {
++      "type": "number",
++      "title": "Context amber from, percent",
++      "description": "The context figure turns amber from this fill.",
+       "required": false,
+-      "default": true
++      "default": 50
++    },
++    "ctxRedPercent": {
++      "type": "number",
++      "title": "Context red from, percent",
++      "description": "The context figure turns red from this fill.",
++      "required": false,
++      "default": 80
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git oldhud/.orphaned_at newhud/.orphaned_at
+deleted file mode 100644
+index 13f2e61..0000000
+--- oldhud/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791320303242
+\ No newline at end of file
+diff --git oldhud/hooks/format.ts new/hud/hooks/format.ts
+index 7678493..a213bc3 100644
+--- oldhud/hooks/format.ts
++++ new/hud/hooks/format.ts
+@@ -5,6 +5,9 @@ const LABEL: Record<string, string> = { five_hour: '5 год', seven_day: '7 д
+ 
+ export const limitLabel = (kind: string) => LABEL[kind] ?? kind
+ 
++/** The band's one-line labels: 5г, 7д. */
++export const bandLabel = (kind: string) => ({ five_hour: '5г', seven_day: '7д' })[kind] ?? limitLabel(kind)
++
+ /** `m:ss` for under an hour, `h:mm:ss` from an hour up; never negative. */
+ export function countdown(ms: number): string {
+   const total = Math.max(0, Math.floor(ms / 1000))
+@@ -34,6 +37,15 @@ export function untilReset(resetsAt: string | undefined, now: number): string {
+   return h > 0 ? `${h}г ${String(m).padStart(2, '0')}х` : `${m}х`
+ }
+ 
++/** True when the window's reset time has passed: the saved percent belongs to a window that no longer exists. */
++export function isReset(resetsAt: string | undefined, now: number): boolean {
++  if (!resetsAt) return false
++
++  const ms = Date.parse(resetsAt)
++
++  return Number.isFinite(ms) && ms <= now
++}
++
+ export type Tone = 'ok' | 'warn' | 'hot'
+ 
+ export const tone = (percent: number, warnAt: number, redAt = 85): Tone => (percent >= redAt ? 'hot' : percent >= warnAt ? 'warn' : 'ok')
+@@ -55,6 +67,11 @@ export function report(args: { limits: Limit[]; usd: number | null; lastReplyAt:
+   if (limits.length === 0) lines.push('  даних немає (їх віддає лише підписка, і лише після першої відповіді)')
+ 
+   for (const l of limits) {
++    if (isReset(l.resetsAt, now)) {
++      lines.push(`  ${limitLabel(l.kind).padEnd(8)} скинуто (було ${Math.round(l.percentUsed)}%, нове значення прийде з наступною відповіддю)`)
++      continue
++    }
++
+     const reset = untilReset(l.resetsAt, now)
+     const flag = l.percentUsed >= redAt ? `  ‼ понад ${redAt}%` : l.percentUsed >= warnAt ? `  ⚠ понад ${warnAt}%` : ''
+ 
+diff --git oldhud/hooks/register.tsx new/hud/hooks/register.tsx
+index 46d19c6..02aa377 100644
+--- oldhud/hooks/register.tsx
++++ new/hud/hooks/register.tsx
+@@ -3,29 +3,39 @@ import type { Register } from 'claude-code'
+ 
+ import type { Limit } from '../types'
+ 
+-import { cacheLeft, countdown, limitLabel, money, report, tone, untilReset } from './format'
++import { bandLabel, cacheLeft, countdown, isReset, limitLabel, money, report, tone, untilReset } from './format'
+ 
+ const limits = atom({ plugin: 'hud', key: 'limits' } as const, [])
+ const usd = atom({ plugin: 'hud', key: 'usd' } as const, null)
+ const stale = atom({ plugin: 'hud', key: 'stale' } as const, false)
+ const lastReplyAt = atom({ plugin: 'hud', key: 'lastReplyAt' } as const, 0)
+ const tick = atom({ plugin: 'hud', key: 'tick' } as const, 0)
++const ctx = atom({ plugin: 'hud', key: 'ctx' } as const, 0)
++
++const ASK: Record<string, string> = {
++  compact: 'Стиснути розмову? Її буде замінено підсумком, щоб звільнити контекст; подробиці втрачаються.',
++  clear: 'Очистити всю розмову? Почнеться з порожнього контексту, це неможливо скасувати.',
++}
++const CHOICES = ['Підтвердити', 'Скасувати']
+ 
+ const COLOR = { ok: '#30A46C', warn: '#E09A1E', hot: '#FF1F1F' } as const
+ 
+ /**
+- * HUD: rate-limit windows, session cost and a prompt-cache countdown in one band above
+- * the prompt, and /hud with the same figures as text (VS Code does not draw the band).
++ * HUD: one line above the prompt: context fill, rate-limit windows, session cost and the prompt-cache
++ * countdown, then the buttons (handoff, Compact, Clear, Progress), and /hud with the same figures as text
++ * (VS Code does not draw the band). The handoff and Progress buttons run commands that other mods register
++ * (`handoff`, `progress`); a missing mod just makes its button do nothing. Compact and Clear ask first (confirm /
++ * cancel) and then run the real command: it is done here because the engine refuses `command.run` from inside a
++ * `command.run` hook, so a command of another mod could not do it.
+  * The band stacks with other mods' bands: the hook asks the hooks beneath (`next`) first
+  * and adds its own line above the result.
+- * The countdown is not in the footer: its order next to another mod's button is set by
+- * load order, which a mod cannot choose.
+  */
+ export const register: Register = (on, options) => {
+   const ttl = Number(options?.cacheTtlMinutes) > 0 ? Number(options.cacheTtlMinutes) : 60
+   const warnAt = Number(options?.warnPercent) > 0 ? Number(options.warnPercent) : 80
+   const redAt = Number(options?.redPercent) > 0 ? Number(options.redPercent) : 85
+-  const refreshAtStart = options?.refreshAtStart !== false
++  const ctxWarn = Number(options?.ctxWarnPercent) > 0 ? Number(options.ctxWarnPercent) : 50
++  const ctxRed = Number(options?.ctxRedPercent) > 0 ? Number(options.ctxRedPercent) : 80
+   const alarmed = new Set<string>()
+   const warned = new Set<string>()
+   let stop: (() => void) | null = null
+@@ -35,8 +45,6 @@ export const register: Register = (on, options) => {
+     // a name already taken must not break the mod
+     await $.command.register({ name: 'hud', description: 'Show rate limits, session cost and the prompt-cache countdown as text' }).catch(() => undefined)
+ 
+-    let hasFresh = false
+-
+     // The windows belong to the account, not the session: show the last ones seen until a reply
+     // refreshes them, so the band is not empty for the whole first turn.
+     try {
+@@ -45,7 +53,6 @@ export const register: Register = (on, options) => {
+       const fresh = (await $.session.usage().catch(() => ({ rateLimits: [] as Limit[] }))).rateLimits
+ 
+       if (fresh.length > 0) {
+-        hasFresh = true
+         await update($, limits, () => fresh.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })))
+       } else {
+         const saved = (await $.store.get('limits')) as { savedAt: number; limits: Limit[] } | undefined
+@@ -60,32 +67,7 @@ export const register: Register = (on, options) => {
+       // a missing reading only leaves the band empty until the first reply
+     }
+ 
+-    const started = await next(e)
+-
+-    // The engine reports the windows only with an API response. One tiny request at the start makes it
+-    // report them now, so the band is live from the first seconds instead of waiting for the first reply.
+-    // Detached: the start never waits for it. Costs one 1-token Haiku call per session (refreshAtStart: false turns it off).
+-    if (refreshAtStart && !hasFresh) {
+-      void (async () => {
+-        try {
+-          await $.model.complete({ model: 'haiku', prompt: '.', maxTokens: 1, effort: 'low', timeoutMs: 8000 })
+-
+-          const rl = (await $.session.usage()).rateLimits
+-
+-          if (rl.length > 0) {
+-            const live = rl.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt }))
+-
+-            await update($, limits, () => live)
+-            await update($, stale, () => false)
+-            await $.store.set('limits', { savedAt: await $.clock.now(), limits: live }).catch(() => undefined)
+-          }
+-        } catch {
+-          // no ping, no live figures: the saved ones stay on screen
+-        }
+-      })()
+-    }
+-
+-    return started
++    return next(e)
+   })
+ 
+   on('session.measure', async ($, e, next) => {
+@@ -100,6 +82,7 @@ export const register: Register = (on, options) => {
+       await $.store.set('limits', { savedAt: now, limits: fresh }).catch(() => undefined)
+     }
+     await update($, usd, () => e.cost?.usd ?? null)
++    await update($, ctx, () => Math.round(e.context.percent ?? 0))
+ 
+     // a turn finished (context or cost moved): that response refreshed the prompt cache
+     if (e.changed.includes('context') || e.changed.includes('cost')) {
+@@ -158,6 +141,7 @@ export const register: Register = (on, options) => {
+     const list = await read($, limits)
+     const cost = (await read($, usd)) ?? 0
+     const reply = await read($, lastReplyAt)
++    const fill = await read($, ctx)
+ 
+     if (e.props.hasSurvey) return below
+ 
+@@ -165,30 +149,53 @@ export const register: Register = (on, options) => {
+ 
+     const now = await $.clock.now()
+     const left = cacheLeft(reply, ttl, now)
+-    const { Box, Text } = $.ui.resolve(e)
++    const { Box, Text, Button } = $.ui.resolve(e)
++    const run = (command: string) => () => void $.command.run({ command }).catch(() => undefined)
++    const confirmRun = (command: 'compact' | 'clear') => () =>
++      void (async () => {
++        const answer = await $.ui.ask(ASK[command]!, CHOICES).catch(() => CHOICES[1])
++
++        if (answer === CHOICES[0]) await $.command.run({ command }).catch(() => undefined)
++        else $.ui.toast(`${command === 'compact' ? 'Стиснення' : 'Очищення'} скасовано: нічого не змінено.`)
++      })()
++    const dot = (k: string) => (
++      <Text key={`dot-${k}`} dimColor>
++        ·
++      </Text>
++    )
++
++    const parts = [
++      fill >= ctxWarn ? (
++        <Text key="ctx" color={fill >= ctxRed ? COLOR.hot : COLOR.warn}>{`Контекст ${fill}%`}</Text>
++      ) : (
++        <Text key="ctx" dimColor>{`Контекст ${fill}%`}</Text>
++      ),
++      ...list.map(l =>
++        isReset(l.resetsAt, now) ? (
++          <Text key={`limit-${l.kind}`} dimColor>{`${bandLabel(l.kind)} скинуто`}</Text>
++        ) : (
++          <Text key={`limit-${l.kind}`}>
++            <Text dimColor>{bandLabel(l.kind)} </Text>
++            <Text color={COLOR[tone(l.percentUsed, warnAt, redAt)]} bold={l.percentUsed >= redAt}>{`${Math.round(l.percentUsed)}%`}</Text>
++            {l.percentUsed >= warnAt && untilReset(l.resetsAt, now) ? <Text dimColor>{` до скидання ${untilReset(l.resetsAt, now)}`}</Text> : null}
++          </Text>
++        ),
++      ),
++      <Text key="cost">{money(cost)}</Text>,
++      <Text key="cache">
++        <Text dimColor>кеш </Text>
++        <Text dimColor={left === null || left === 0}>{left === null ? '—' : left === 0 ? 'вийшов' : countdown(left)}</Text>
++      </Text>,
++    ]
+ 
+     return (
+       <Box flexDirection="column">
+-        <Box flexDirection="row" gap={2}>
+-          {list.map(l => {
+-            const reset = untilReset(l.resetsAt, now)
+-
+-            return (
+-              <Text key={`limit-${l.kind}`}>
+-                <Text dimColor>{limitLabel(l.kind)} </Text>
+-                <Text color={COLOR[tone(l.percentUsed, warnAt, redAt)]} bold={l.percentUsed >= redAt}>{`${Math.round(l.percentUsed)}%`}</Text>
+-                {reset ? <Text dimColor>{` · ${reset}`}</Text> : null}
+-              </Text>
+-            )
+-          })}
+-          <Text key="cost">
+-            <Text dimColor>сесія </Text>
+-            <Text>{money(cost)}</Text>
+-          </Text>
+-          <Text key="cache">
+-            <Text dimColor>cache </Text>
+-            <Text dimColor={left === null || left === 0}>{left === null ? '—' : left === 0 ? 'expired' : countdown(left)}</Text>
+-          </Text>
++        <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
++          {parts.flatMap((p, i) => (i === 0 ? [p] : [dot(String(i)), p]))}
++          <Button key="b-handoff" label="Зібрати handoff" onPress={run('handoff')} />
++          <Button key="b-compact" label="Compact" onPress={confirmRun('compact')} />
++          <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
++          <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
+         </Box>
+         {below}
+       </Box>
+diff --git oldhud/tests/format.test.mjs new/hud/tests/format.test.mjs
+index c62595e..94d71c6 100644
+--- oldhud/tests/format.test.mjs
++++ new/hud/tests/format.test.mjs
+@@ -1,7 +1,7 @@
+ import assert from 'node:assert/strict'
+ import { test } from 'node:test'
+ 
+-import { cacheLeft, countdown, report, tone, untilReset } from '../hooks/format.ts'
++import { cacheLeft, countdown, isReset, report, tone, untilReset } from '../hooks/format.ts'
+ 
+ test('countdown', () => {
+   assert.equal(countdown(59 * 60000 + 49000), '59:49')
+@@ -59,3 +59,20 @@ test('report marks a limit over the red threshold more strongly than over the wa
+   assert.match(text, /5 год\s+86%.*‼ понад 85%/)
+   assert.match(text, /7 дн\s+83%.*⚠ понад 80%/)
+ })
++
++test('isReset: true only when the reset time is known and has passed', () => {
++  const now = Date.parse('2026-10-06T10:00:00Z')
++
++  assert.equal(isReset('2026-10-06T09:00:00Z', now), true)
++  assert.equal(isReset('2026-10-06T11:00:00Z', now), false)
++  assert.equal(isReset(undefined, now), false)
++  assert.equal(isReset('not a date', now), false)
++})
++
++test('report: a window whose reset time passed says "скинуто", not the old percent as current', () => {
++  const now = Date.parse('2026-10-06T10:00:00Z')
++  const text = report({ limits: [{ kind: 'five_hour', percentUsed: 91, resetsAt: '2026-10-06T09:00:00Z' }], usd: 0.1, lastReplyAt: now, ttlMinutes: 60, now, warnAt: 80 })
++
++  assert.match(text, /скинуто \(було 91%/)
++  assert.doesNotMatch(text, /‼|⚠/)
++})
+diff --git oldhud/tests/register.test.ts new/hud/tests/register.test.ts
+index 9d3d846..b48a8d7 100644
+--- oldhud/tests/register.test.ts
++++ new/hud/tests/register.test.ts
+@@ -76,6 +76,77 @@ describe('hud', () => {
+     }
+   })
+ 
++  test('a window whose reset time has passed shows "скинуто" instead of the old percent', async ($, on) => {
++    mock.clock(on, { now: Date.parse('2026-10-06T12:00:00Z') })
++    stub(on)
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++    await $.session.measure({ ...MEASURE, rateLimits: [{ kind: 'five_hour', percentUsed: 91, resetsAt: '2026-10-06T11:07:00Z' }, { kind: 'seven_day', percentUsed: 21, resetsAt: '2026-10-12T20:00:00Z' }] })
++
++    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
++
++    expect(await ui.find({ type: 'Text', text: /5г скинуто/ })).toBeDefined()
++    expect(await ui.find({ type: 'Text', text: /91%/ })).toBeUndefined()
++    expect(await ui.find({ type: 'Text', text: /21%/ })).toBeDefined()
++    await ui.unmount()
++  })
++
++  test('one line: context, limits, cost, cache; then the four buttons that run other mods\' commands', async ($, on) => {
++    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
++    stub(on)
++    const ran: string[] = []
++    on('command.run', ($: any, e: any) => (ran.push(e.command), { text: '' }))
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++    await $.session.measure({ ...MEASURE, context: { percent: 49 }, rateLimits: [{ kind: 'five_hour', percentUsed: 31 }, { kind: 'seven_day', percentUsed: 28 }] })
++
++    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
++
++    expect(await ui.find({ type: 'Text', text: /Контекст 49%/ })).toBeDefined()
++    expect(await ui.find({ type: 'Text', text: /5г/ })).toBeDefined()
++    expect(await ui.find({ type: 'Text', text: /7д/ })).toBeDefined()
++    expect(await ui.find({ type: 'Text', text: /31%/ })).toBeDefined()
++    expect(await ui.find({ type: 'Text', text: /до скидання/ })).toBeUndefined()
++
++    for (const label of ['Зібрати handoff', 'Compact', 'Clear', 'Прогрес']) {
++      expect(await ui.find({ type: 'Button', text: new RegExp(label) })).toBeDefined()
++    }
++
++    await ui.unmount()
++  })
++
++  test('Compact asks first: Підтвердити runs the command, Скасувати changes nothing; handoff and Прогрес run their commands', async ($, on) => {
++    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
++    stub(on)
++    const ran: string[] = []
++    const asked: string[] = []
++    let answer = 'Скасувати'
++    on('command.run', ($: any, e: any) => (ran.push(`${e.command}:${e.origin.kind}`), { text: '' }))
++    on('tool.call', { tool: 'AskUserQuestion' }, ($: any, e: any) => {
++      const q = String(e.questions[0].question)
++
++      asked.push(q)
++
++      return { result: { questions: e.questions, answers: { [q]: answer } } }
++    })
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++    await $.session.measure(MEASURE)
++
++    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
++
++    await ui.press({ key: 'b-compact' })
++    expect(asked[0]).toContain('Стиснути розмову')
++    expect(ran).toEqual([])
++
++    answer = 'Підтвердити'
++    await ui.press({ key: 'b-clear' })
++    expect(asked[1]).toContain('Очистити всю розмову')
++    expect(ran).toEqual(['clear:plugin'])
++
++    await ui.press({ key: 'b-handoff' })
++    await ui.press({ key: 'b-progress' })
++    expect(ran).toEqual(['clear:plugin', 'handoff:plugin', 'progress:plugin'])
++    await ui.unmount()
++  })
++
+   test('before the first measurement the band already shows the session cost and an empty cache', async ($, on) => {
+     mock.clock(on)
+     stub(on)
+@@ -83,9 +154,9 @@ describe('hud', () => {
+ 
+     const ui = await $.ui.mount({ plugin: 'hud', surface: 'terminal', ...BAND })
+ 
+-    expect(await ui.find({ type: 'Text', text: /сесія/ })).toBeDefined()
+     expect(await ui.find({ type: 'Text', text: /\$0\.00/ })).toBeDefined()
+-    expect(await ui.find({ type: 'Text', text: /cache/ })).toBeDefined()
++    expect(await ui.find({ type: 'Text', text: /\$0\.00/ })).toBeDefined()
++    expect(await ui.find({ type: 'Text', text: /кеш/ })).toBeDefined()
+     expect(await ui.find({ type: 'Text', text: /1:00:00/ })).toBeUndefined()
+     await ui.unmount()
+   })
+diff --git oldhud/tsconfig.json newhud/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldhud/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git oldhud/types/index.d.ts new/hud/types/index.d.ts
+index b1e98e7..55cd7e7 100644
+--- oldhud/types/index.d.ts
++++ new/hud/types/index.d.ts
+@@ -11,6 +11,8 @@ declare module 'claude-code' {
+       lastReplyAt: number
+       // bumped every second while the cache countdown runs
+       tick: number
++      // context fill, percent, from the last measurement
++      ctx: number
+     }
+   }
+ }
+diff --git oldhandoff/.claude-plugin/plugin.json new/handoff/.claude-plugin/plugin.json
+index c1caf45..d9de95a 100644
+--- oldhandoff/.claude-plugin/plugin.json
++++ new/handoff/.claude-plugin/plugin.json
+@@ -1,17 +1,32 @@
+ {
+   "name": "handoff",
+-  "version": "0.1.1",
+-  "description": "From 80% of the context: a button (desktop), a hint line (terminal) or a hint after the answer (VS Code) offering /handoff, which puts a HANDOFF.md/CONTEXT.md prompt into the input box.",
++  "version": "0.6.0",
++  "description": "The mini Clippy beside the band above the prompt: calm / worried / panic by context fill, with random Ukrainian remarks; /handoff puts a HANDOFF.md/CONTEXT.md prompt into the input box (the hud band has its button). VS Code: a hint after the answer from 80%.",
+   "author": {
+     "name": "noaod"
+   },
+   "userConfig": {
++    "warnPercent": {
++      "type": "number",
++      "title": "Colour the context amber from, percent",
++      "description": "The context line is always shown; from this fill it turns amber (and red from handoffAtPercent).",
++      "required": false,
++      "default": 50
++    },
+     "handoffAtPercent": {
+       "type": "number",
+       "title": "Offer handoff at, percent of context",
+       "description": "From this context fill a button (desktop), a hint line (terminal) or a hint after the answer (VS Code) offers /handoff.",
+       "required": false,
+       "default": 80
++    },
++    "remarkEverySeconds": {
++      "type": "number",
++      "title": "Clippy random remark every, seconds",
++      "description": "A short random phrase from the Clippy about this often (x0.5..1.5, shown for 9 s). 0: no random phrases.",
++      "required": false,
++      "default": 120
+     }
+-  }
+-}
+\ No newline at end of file
++  },
++  "types": "./types/index.d.ts"
++}
+diff --git oldhandoff/.orphaned_at newhandoff/.orphaned_at
+deleted file mode 100644
+index 4d7a195..0000000
+--- oldhandoff/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791307097069
+\ No newline at end of file
+diff --git old/handoff/hooks/clippy.ts new/handoff/hooks/clippy.ts
+new file mode 100644
+index 0000000..2c16d84
+--- /dev/null
++++ new/handoff/hooks/clippy.ts
+@@ -0,0 +1,33 @@
++export type ClippyMood = 'calm' | 'worried' | 'panic'
++
++/** The mood follows the context fill: calm below `warn`, worried from it, panic from `at`. */
++export const clippyMood = (percent: number, warn: number, at: number): ClippyMood => (percent >= at ? 'panic' : percent >= warn ? 'worried' : 'calm')
++
++/** Terminal has no `Svg` element: a one-line face stands in for the picture. */
++export const clippyFace = (m: ClippyMood): string => (m === 'panic' ? '(°□°)' : m === 'worried' ? '(•_•)' : '(•‿•)')
++
++/** The speech-bubble line; empty while calm. Plain text, no emoji. */
++export const clippyLine = (m: ClippyMood, percent: number): string =>
++  m === 'panic' ? `Місце закінчується (${percent}%). Збери handoff, поки не пізно.` : m === 'worried' ? 'Контекст уже заповнюється. Подумай про handoff.' : ''
++
++const BODY = '<path d="M45 200 L45 20 Q45 -5 70 -5 Q95 -5 95 20 L95 175 Q95 195 75 195 Q55 195 55 175 L55 40 Q55 28 70 28 Q85 28 85 40 L85 160" fill="none" stroke="#9aa3ad" stroke-width="10" stroke-linecap="round"/>'
++
++const FACE: Record<ClippyMood, string> = {
++  calm:
++    '<circle cx="58" cy="40" r="10" fill="#fff" stroke="#111" stroke-width="3"/><circle cx="82" cy="40" r="10" fill="#fff" stroke="#111" stroke-width="3"/>' +
++    '<circle cx="60" cy="41" r="4" fill="#111"/><circle cx="84" cy="41" r="4" fill="#111"/>' +
++    '<path d="M60 64 Q70 72 80 64" fill="none" stroke="#111" stroke-width="3" stroke-linecap="round"/>',
++  worried:
++    '<circle cx="58" cy="40" r="11" fill="#fff" stroke="#111" stroke-width="3"/><circle cx="82" cy="40" r="11" fill="#fff" stroke="#111" stroke-width="3"/>' +
++    '<circle cx="55" cy="42" r="4" fill="#111"/><circle cx="79" cy="42" r="4" fill="#111"/>' +
++    '<path d="M50 24 L64 29 M88 24 L76 29" stroke="#111" stroke-width="3" stroke-linecap="round"/>' +
++    '<path d="M60 68 Q70 62 80 68" fill="none" stroke="#111" stroke-width="3" stroke-linecap="round"/>',
++  panic:
++    '<circle cx="58" cy="40" r="12" fill="#fff" stroke="#111" stroke-width="3"/><circle cx="82" cy="40" r="12" fill="#fff" stroke="#111" stroke-width="3"/>' +
++    '<circle cx="58" cy="40" r="3" fill="#111"/><circle cx="82" cy="40" r="3" fill="#111"/>' +
++    '<ellipse cx="70" cy="68" rx="7" ry="9" fill="#7f1d1d" stroke="#111" stroke-width="3"/>' +
++    '<path d="M100 20 Q106 30 100 36 Q94 30 100 20" fill="#378ADD"/>',
++}
++
++/** A small Clippy as an SVG document for the desktop `Svg` element. */
++export const clippySvg = (m: ClippyMood): string => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -20 200 250">${BODY}${FACE[m]}</svg>`
+diff --git old/handoff/hooks/phrases.ts new/handoff/hooks/phrases.ts
+new file mode 100644
+index 0000000..4cd5702
+--- /dev/null
++++ new/handoff/hooks/phrases.ts
+@@ -0,0 +1,39 @@
++import type { ClippyMood } from './clippy'
++
++/** Random remarks, by mood. Short plain Ukrainian, QA flavoured, no emoji, nobody targeted. Edit freely. */
++export const PHRASES: Record<ClippyMood, string[]> = {
++  calm: [
++    'Баг не вовк, у прод не втече.',
++    'Скриншот-доказ уже збережено?',
++    'Severity оцінюй за ТЗ, а не за гучністю бага.',
++    'Випий води. Тест-кейси почекають.',
++    'Автоматизація це результат ручного QA, а не його заміна.',
++    'Граничні значення перевірив? Мінус один, нуль, максимум.',
++    'Це баг чи фіча? Відкрий ТЗ.',
++    '«На моїй машині працює» не є кроками відтворення.',
++    'Один сценарій, одна перевірка. Не складай все в один тест.',
++    'Я лише скріпка, але глянь на цей крок ще раз.',
++    'Емулятор viewport не замінює справжній пристрій.',
++  ],
++  worried: [
++    'Контекст уже заповнюється. Може, час на handoff?',
++    'Тримайся: ще є місце, але вже не безмежно.',
++    'Закоміть зроблене, поки є запас контексту.',
++  ],
++  panic: [
++    'Місце майже скінчилось. Handoff, швидко!',
++    'Збери HANDOFF.md, поки не пізно.',
++    'Ще трохи і доведеться починати з нуля. Handoff!',
++  ],
++}
++
++/** A phrase for the mood, never the same as the last one (when the pool has more than one). */
++export function pickPhrase(mood: ClippyMood, last: string, rnd: () => number): string {
++  const pool = PHRASES[mood].filter(p => p !== last)
++  const from = pool.length > 0 ? pool : PHRASES[mood]
++
++  return from[Math.min(from.length - 1, Math.floor(rnd() * from.length))]
++}
++
++/** Milliseconds until the next remark: the base interval times a random 0.5..1.5. */
++export const nextDelay = (everySeconds: number, rnd: () => number): number => Math.round(everySeconds * 1000 * (0.5 + rnd()))
+diff --git oldhandoff/hooks/register.tsx new/handoff/hooks/register.tsx
+index 37fe75e..5b6c6b2 100644
+--- oldhandoff/hooks/register.tsx
++++ new/handoff/hooks/register.tsx
+@@ -1,16 +1,31 @@
++import { atom, read, update } from 'claude-code'
+ import type { Register } from 'claude-code'
+ 
++import { clippyFace, clippyLine, clippyMood, clippySvg } from './clippy'
+ import { HANDOFF_PROMPT, hintLevel, hintLine } from './logic'
++import { nextDelay, pickPhrase } from './phrases'
++
++const remark = atom({ plugin: 'handoff', key: 'remark' } as const, '')
+ 
+ /**
+- * Handoff: from `handoffAtPercent` of the context (default 80) it offers to collect a handoff.
+- * Desktop: a button in the band above the prompt. Terminal (CLI): a hint line in that band.
++ * Handoff: the `/handoff` command, the mini Clippy with its mood and random remarks beside the band above the prompt
++ * (the context figure and the button are drawn by the hud band since 0.6.0), and the VS Code hint. The mood: calm below
++ * `warnPercent` (50), worried from it, panic from `handoffAtPercent` (80).
++ * Prototype: a mini Clippy beside the band: calm, worried from `warnPercent`, panic from
++ * `handoffAtPercent`, with a short line once it is worried. Desktop draws an SVG, the terminal a one-line face.
++ * From `handoffAtPercent` (default 80) VS Code, which draws no band, gets the hint after the final answer.
+  * VS Code draws no band: a hint line is added to the end of the final answer instead, once at the
+  * threshold and again for every further 5 points. `/handoff` works everywhere: it puts the prompt
+  * into the input box (nothing is sent), or, where the box cannot be filled, copies it and prints it.
+  */
+ export const register: Register = (on, options) => {
+   const at = Number(options?.handoffAtPercent) > 0 ? Number(options.handoffAtPercent) : 80
++  const warn = Number(options?.warnPercent) > 0 ? Number(options.warnPercent) : 50
++  const everySeconds = options?.remarkEverySeconds === 0 ? 0 : Number(options?.remarkEverySeconds) > 0 ? Number(options.remarkEverySeconds) : 120
++  const SHOW_MS = 9000
++  let lastRemark = ''
++  let nextAt = 0
++  let timerOn = false
+   let percent = 0
+   let surface = ''
+   let hinted = 0
+@@ -24,18 +39,46 @@ export const register: Register = (on, options) => {
+     return next(e)
+   })
+ 
+-  on('session.measure', ($, e, next) => {
++  on('session.measure', async ($, e, next) => {
+     percent = Math.round(e.context.percent ?? 0)
+ 
+     if (percent < at) hinted = 0
+ 
++    // random remarks of the Clippy: a check every 5 s, a remark every `remarkEverySeconds` (x0.5..1.5), shown for 9 s.
++    // Started here, not in session.start: that event may not reach the mod (a resumed session), a measure always does.
++    if (!timerOn && everySeconds > 0 && surface !== 'vscode') {
++      timerOn = true
++      nextAt = (await $.clock.now()) + nextDelay(everySeconds, Math.random)
++      $.clock.every(5000, () => {
++        void (async () => {
++          const now = await $.clock.now()
++
++          if (now < nextAt) return
++
++          lastRemark = pickPhrase(clippyMood(percent, warn, at), lastRemark, Math.random)
++          nextAt = now + nextDelay(everySeconds, Math.random)
++          await update($, remark, () => lastRemark)
++          $.clock.after(SHOW_MS, () => void update($, remark, () => ''))
++        })()
++      })
++    }
++
+     return next(e)
+   })
+ 
+-  on('command.run', { command: 'handoff' }, async $ => {
++  on('command.run', { command: 'handoff' }, async ($, e) => {
+     const filled = await $.prompt.fill({ text: HANDOFF_PROMPT }).catch(() => ({ isFilled: false }))
+ 
+-    if (filled.isFilled) return { text: 'Handoff: промпт у полі вводу. Перевір і натисни Enter.' }
++    if (filled.isFilled) {
++      // pressed from the hud band: a toast is enough, the transcript stays clean
++      if (e.origin.kind === 'plugin') {
++        $.ui.toast('Handoff: промпт у полі вводу. Перевір і натисни Enter.')
++
++        return { text: '' }
++      }
++
++      return { text: 'Handoff: промпт у полі вводу. Перевір і натисни Enter.' }
++    }
+ 
+     const copied = await $.ui.copy({ text: HANDOFF_PROMPT }).catch(() => ({ isCopied: false }))
+ 
+@@ -45,30 +88,31 @@ export const register: Register = (on, options) => {
+   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+     const below = await next(e)
+ 
+-    if (e.props.hasSurvey || percent < at) return below
++    if (e.props.hasSurvey) return below
+ 
+-    const { Box, Text, Button } = $.ui.resolve(e)
++    const ui: any = $.ui.resolve(e)
++    const { Box, Text, Svg } = ui
+     const isDesktop = e.surface === 'desktop'
+-
+-    return (
++    const mood = clippyMood(percent, warn, at)
++    const talking = await read($, remark)
++    const say = talking || clippyLine(mood, percent)
++    // prototype: a mini Clippy beside the band. Desktop draws an SVG; the terminal has no Svg, so a one-line face.
++    const pic = isDesktop ? <Svg source={clippySvg(mood)} alt={`Clippy: ${mood}`} width={46} height={58} /> : <Text>{clippyFace(mood)}</Text>
++
++    // the context line and the button live in the hud band now; here: the remark of the Clippy, then everything below
++    const band = (
+       <Box flexDirection="column">
+-        <Box flexDirection="row" gap={2}>
+-          <Text color={percent >= at + 10 ? '#FF1F1F' : '#E09A1E'}>{`Контекст ${percent}%`}</Text>
+-          {isDesktop ? (
+-            <Button
+-              key="handoff"
+-              label="Зібрати handoff"
+-              onPress={() => {
+-                void $.prompt.fill({ text: HANDOFF_PROMPT })
+-              }}
+-            />
+-          ) : (
+-            <Text dimColor>введи /handoff, щоб зібрати HANDOFF.md і CONTEXT.md</Text>
+-          )}
+-        </Box>
++        {say ? <Text color={percent >= at ? '#FF1F1F' : '#E09A1E'}>{say}</Text> : null}
+         {below}
+       </Box>
+     )
++
++    return (
++      <Box flexDirection="row" gap={2}>
++        {pic}
++        {band}
++      </Box>
++    )
+   })
+ 
+   // VS Code draws no band: the hint rides on the final answer of the main loop
+diff --git old/handoff/tests/phrases.test.mjs new/handoff/tests/phrases.test.mjs
+new file mode 100644
+index 0000000..a956df4
+--- /dev/null
++++ new/handoff/tests/phrases.test.mjs
+@@ -0,0 +1,34 @@
++import assert from 'node:assert/strict'
++import { test } from 'node:test'
++
++import { PHRASES, nextDelay, pickPhrase } from '../hooks/phrases.ts'
++
++test('pickPhrase: from the mood pool, never the same as the last one', () => {
++  for (const mood of ['calm', 'worried', 'panic']) {
++    const last = PHRASES[mood][0]
++
++    for (const r of [0, 0.25, 0.5, 0.99, 1]) {
++      const p = pickPhrase(mood, last, () => r)
++
++      assert.ok(PHRASES[mood].includes(p))
++      assert.notEqual(p, last)
++    }
++  }
++})
++
++test('pickPhrase: a one-phrase pool may repeat', () => {
++  assert.ok(typeof pickPhrase('calm', 'x', () => 0.5) === 'string')
++})
++
++test('nextDelay: 0.5..1.5 of the base interval', () => {
++  assert.equal(nextDelay(120, () => 0), 60000)
++  assert.equal(nextDelay(120, () => 0.5), 120000)
++  assert.equal(nextDelay(120, () => 1), 180000)
++})
++
++test('the pools are non-empty and have no empty strings', () => {
++  for (const mood of Object.keys(PHRASES)) {
++    assert.ok(PHRASES[mood].length >= 3)
++    assert.ok(PHRASES[mood].every(p => p.trim().length > 0 && p.length <= 80))
++  }
++})
+diff --git oldhandoff/tests/register.test.ts new/handoff/tests/register.test.ts
+index 61c7957..58ae61c 100644
+--- oldhandoff/tests/register.test.ts
++++ new/handoff/tests/register.test.ts
+@@ -1,4 +1,4 @@
+-import { describe, expect, test } from 'claude-code/testing'
++import { describe, expect, mock, test } from 'claude-code/testing'
+ 
+ const BAND = {
+   component: 'AbovePrompt',
+@@ -34,31 +34,70 @@ const chunks = async (stream: AsyncIterable<any>) => {
+ }
+ 
+ describe('handoff', () => {
+-  test('desktop: from 80% the band has a button that fills the prompt; below it nothing', async ($, on) => {
++  test('the context line and the button are not drawn here any more (the hud band has them)', async ($, on) => {
+     stubs(on)
+     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++    await measure($, 60)
++
++    const ui = await $.ui.mount({ plugin: 'handoff', surface: 'desktop', ...BAND })
++
++    expect(await ui.find({ type: 'Text', text: /Контекст \d+%/ })).toBeUndefined()
++    expect(await ui.find({ type: 'Button' })).toBeUndefined()
++    expect(await ui.find({ type: 'Text', text: /Контекст уже заповнюється/ })).toBeDefined()
++    await ui.unmount()
++  })
+ 
+-    await measure($, 70)
+-    const low = await $.ui.mount({ plugin: 'handoff', surface: 'desktop', ...BAND })
+-    expect(await low.find({ type: 'Text', text: /Контекст/ })).toBeUndefined()
+-    await low.unmount()
++  test('desktop: a mini Clippy (Svg) beside the band, its mood follows the context; a line from 50%', async ($, on) => {
++    stubs(on)
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+ 
+-    await measure($, 83)
+-    const hot = await $.ui.mount({ plugin: 'handoff', surface: 'desktop', ...BAND })
+-    expect(await hot.find({ type: 'Text', text: /Контекст 83%/ })).toBeDefined()
+-    expect(await hot.find({ type: 'Button', text: /handoff/i })).toBeDefined()
+-    await hot.unmount()
++    await measure($, 30)
++    const calm = await $.ui.mount({ plugin: 'handoff', surface: 'desktop', ...BAND })
++    expect(await calm.find({ type: 'Svg', alt: /calm/ })).toBeDefined()
++    expect(await calm.find({ type: 'Text', text: /Збери handoff/ })).toBeUndefined()
++    await calm.unmount()
++
++    await measure($, 90)
++    const panic = await $.ui.mount({ plugin: 'handoff', surface: 'desktop', ...BAND })
++    expect(await panic.find({ type: 'Svg', alt: /panic/ })).toBeDefined()
++    expect(await panic.find({ type: 'Text', text: /Збери handoff/ })).toBeDefined()
++    await panic.unmount()
+   })
+ 
+-  test('terminal (CLI): a hint line instead of a button', async ($, on) => {
++  test('desktop: the Clippy says a random remark from time to time, then goes quiet', async ($, on) => {
++    const clock = mock.clock(on)
++    stubs(on)
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++    await measure($, 10)
++
++    const ui = await $.ui.mount({ plugin: 'handoff', surface: 'desktop', ...BAND })
++    const quote = /скріншот-доказ|Severity|води|Автоматизація|Граничні|баг чи фіча|моїй машині|сценарій|скріпка|viewport|вовк/
++
++    expect(await ui.find({ type: 'Text', text: quote })).toBeUndefined()
++
++    // the first remark comes after 60-180 s (random): step in 5 s until it shows
++    let shown = false
++
++    for (let i = 0; i < 40 && !shown; i++) {
++      await clock.advance(5_000)
++      shown = (await ui.find({ type: 'Text', text: quote })) !== undefined
++    }
++
++    expect(shown).toBe(true)
++    await clock.advance(10_000)
++    expect(await ui.find({ type: 'Text', text: quote })).toBeUndefined()
++    await ui.unmount()
++  })
++
++  test('terminal (CLI): a one-line face instead of the picture', async ($, on) => {
+     stubs(on)
+     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+     await measure($, 85)
+ 
+     const ui = await $.ui.mount({ plugin: 'handoff', surface: 'terminal', ...BAND })
+ 
+-    expect(await ui.find({ type: 'Text', text: /\/handoff/ })).toBeDefined()
+-    expect(await ui.find({ type: 'Button', text: /handoff/i })).toBeUndefined()
++    expect(await ui.find({ type: 'Text', text: /\(°□°\)/ })).toBeDefined()
++    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+     await ui.unmount()
+   })
+ 
+@@ -87,6 +126,15 @@ describe('handoff', () => {
+     expect(ok.text).toContain('у полі вводу')
+   })
+ 
++  test('/handoff pressed from the hud band (origin plugin) leaves the transcript clean', async ($, on) => {
++    stubs(on, true)
++    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++
++    const out = await $.command.run({ command: 'handoff', args: '', origin: { kind: 'plugin', name: 'hud' } })
++
++    expect(out.text).toBe('')
++  })
++
+   test('/handoff prints the prompt when the box cannot be filled', async ($, on) => {
+     stubs(on, false)
+     await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' })
+diff --git oldhandoff/tsconfig.json newhandoff/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldhandoff/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git old/handoff/types/index.d.ts new/handoff/types/index.d.ts
+new file mode 100644
+index 0000000..0e5c032
+--- /dev/null
++++ new/handoff/types/index.d.ts
+@@ -0,0 +1,10 @@
++export type Remark = string
++
++declare module 'claude-code' {
++  interface PluginState {
++    handoff: {
++      // the Clippy's current random remark; empty while it is quiet
++      remark: string
++    }
++  }
++}
+diff --git oldquick-actions/.claude-plugin/plugin.json new/quick-actions/.claude-plugin/plugin.json
+index 61fd6c8..565f21a 100644
+--- oldquick-actions/.claude-plugin/plugin.json
++++ new/quick-actions/.claude-plugin/plugin.json
+@@ -1,16 +1,8 @@
+ {
+   "name": "quick-actions",
+-  "version": "0.1.0",
+-  "description": "Compact and Clear buttons in the footer; each asks to confirm or cancel before it runs the slash command. In VS Code (no footer) the typed /compact and /clear ask first.",
+-  "author": { "name": "noaod" },
+-  "userConfig": {
+-    "confirmTypedCommands": {
+-      "type": "string",
+-      "title": "Ask before a typed /compact or /clear",
+-      "description": "vscode: only in VS Code, which has no footer buttons (default). always: on every surface. never: the buttons ask, typed commands do not.",
+-      "options": ["vscode", "always", "never"],
+-      "required": false,
+-      "default": "vscode"
+-    }
++  "version": "0.3.0",
++  "description": "In VS Code (no band above the prompt) the typed /compact and /clear ask first (confirm / cancel). The Compact and Clear buttons of the desktop and terminal are in the hud band.",
++  "author": {
++    "name": "noaod"
+   }
+ }
+diff --git oldquick-actions/.in_use/96347 newquick-actions/.in_use/96347
+deleted file mode 100644
+index 0ca904d..0000000
+--- oldquick-actions/.in_use/96347
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96347,"procStart":"Tue Oct  6 21:24:18 2026"}
+\ No newline at end of file
+diff --git oldquick-actions/.in_use/96679 newquick-actions/.in_use/96679
+deleted file mode 100644
+index 15b1f95..0000000
+--- oldquick-actions/.in_use/96679
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96679,"procStart":"Tue Oct  6 21:26:25 2026"}
+\ No newline at end of file
+diff --git oldquick-actions/.in_use/97163 newquick-actions/.in_use/97163
+deleted file mode 100644
+index 28ecc03..0000000
+--- oldquick-actions/.in_use/97163
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":97163,"procStart":"Tue Oct  6 21:28:31 2026"}
+\ No newline at end of file
+diff --git oldquick-actions/.orphaned_at newquick-actions/.orphaned_at
+deleted file mode 100644
+index 903fdd8..0000000
+--- oldquick-actions/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791324094673
+\ No newline at end of file
+diff --git oldquick-actions/hooks/register.tsx new/quick-actions/hooks/register.tsx
+index f11d6bd..3945b97 100644
+--- oldquick-actions/hooks/register.tsx
++++ new/quick-actions/hooks/register.tsx
+@@ -1,19 +1,18 @@
+ import type { Register } from 'claude-code'
+ 
+ const QUESTION: Record<string, string> = {
+-  compact: 'Compact the conversation? It is replaced by a summary to free up context; the details are lost.',
+-  clear: 'Clear the whole conversation? This starts over with an empty context and cannot be undone.',
++  compact: 'Стиснути розмову? Її буде замінено підсумком, щоб звільнити контекст; подробиці втрачаються.',
++  clear: 'Очистити всю розмову? Почнеться з порожнього контексту, це неможливо скасувати.',
+ }
++const CHOICES = ['Підтвердити', 'Скасувати']
+ 
+ /**
+- * Quick actions: two buttons, Compact and Clear, in the footer next to the mode labels, each doing what the
+- * slash command does but only after a confirm / cancel pop-up (cancel changes nothing).
+- * The footer is drawn on the desktop app and the terminal; VS Code has none, so there the typed `/compact` and
+- * `/clear` themselves ask first (option `confirmTypedCommands`: `vscode` by default, `always`, `never`).
+- * A run that a plugin started (the buttons) is never asked twice.
++ * Quick actions: VS Code has no band above the prompt, so there the typed `/compact` and `/clear` ask first
++ * (confirm / cancel; cancel changes nothing). On the desktop and in the terminal the Compact and Clear buttons are in
++ * the hud band and ask themselves: a button cannot go through here, because the engine refuses `command.run` from a
++ * `command.run` hook. A run that a plugin started is never asked twice.
+  */
+-export const register: Register = (on, options) => {
+-  const policy = String(options?.confirmTypedCommands ?? 'vscode')
++export const register: Register = on => {
+   let surface = ''
+ 
+   on('session.start', ($, e, next) => {
+@@ -22,49 +21,11 @@ export const register: Register = (on, options) => {
+     return next(e)
+   })
+ 
+-  // typed /compact and /clear: ask first where there is no button (VS Code), or everywhere when asked to
+   on('command.run', { command: ['compact', 'clear'] }, async ($, e, next) => {
+-    const ask = e.origin.kind !== 'plugin' && (policy === 'always' || (policy === 'vscode' && surface === 'vscode'))
++    if (e.origin.kind === 'plugin' || surface !== 'vscode') return next(e)
+ 
+-    if (!ask) return next(e)
++    const answer = await $.ui.ask(QUESTION[e.command] ?? 'Виконати?', CHOICES).catch(() => CHOICES[1])
+ 
+-    const answer = await $.ui.ask(QUESTION[e.command] ?? 'Run it?', ['Confirm', 'Cancel']).catch(() => 'Cancel')
+-
+-    return answer === 'Confirm' ? next(e) : { text: `/${e.command} cancelled: nothing was changed.` }
+-  })
+-
+-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+-    const below = await next(e)
+-    const { Box, Button } = $.ui.resolve(e)
+-
+-    return (
+-      <Box flexDirection="row" alignItems="center" gap={1}>
+-        <Button
+-          key="qa-compact"
+-          label="Compact"
+-          onPress={() => {
+-            void (async () => {
+-              const answer = await $.ui.ask(QUESTION.compact!, ['Confirm', 'Cancel']).catch(() => 'Cancel')
+-
+-              if (answer === 'Confirm') await $.command.run({ command: 'compact' }).catch(() => undefined)
+-              else $.ui.toast('Compact cancelled: nothing was changed.')
+-            })()
+-          }}
+-        />
+-        <Button
+-          key="qa-clear"
+-          label="Clear"
+-          onPress={() => {
+-            void (async () => {
+-              const answer = await $.ui.ask(QUESTION.clear!, ['Confirm', 'Cancel']).catch(() => 'Cancel')
+-
+-              if (answer === 'Confirm') await $.command.run({ command: 'clear' }).catch(() => undefined)
+-              else $.ui.toast('Clear cancelled: nothing was changed.')
+-            })()
+-          }}
+-        />
+-        {below}
+-      </Box>
+-    )
++    return answer === CHOICES[0] ? next(e) : { text: `/${e.command} скасовано: нічого не змінено.` }
+   })
+ }
+diff --git oldquick-actions/tests/register.test.ts new/quick-actions/tests/register.test.ts
+index 43699ea..5d2f51e 100644
+--- oldquick-actions/tests/register.test.ts
++++ new/quick-actions/tests/register.test.ts
+@@ -1,12 +1,8 @@
+ import { describe, expect, test } from 'claude-code/testing'
+ 
+-const SESSION_MODE = { component: 'SessionMode', props: { modes: [] } } as const
+-
+ // $.ui.ask is a tool.call of AskUserQuestion: the test answers it like the dialog would
+ const stubs = (on: any, answer: string | Error | (() => string), ran: string[] = [], asked: string[] = []) => {
+   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
+-  on('ui.toast', () => ({ value: undefined }))
+-  on('ui.render', ($: any, e: any) => $.ui.resolve(e).Box({}))
+   on('command.run', ($: any, e: any) => (ran.push(`${e.command}:${e.origin.kind}`), { text: `${e.command} done` }))
+   on('tool.call', { tool: 'AskUserQuestion' }, ($: any, e: any) => {
+     if (answer instanceof Error) throw answer
+@@ -19,95 +15,49 @@ const stubs = (on: any, answer: string | Error | (() => string), ran: string[] =
+   })
+ }
+ 
+-describe('quick-actions', () => {
+-  test('the footer has Compact and Clear on desktop and terminal', async ($, on) => {
+-    stubs(on, 'Confirm')
+-    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+-
+-    for (const surface of ['desktop', 'terminal'] as const) {
+-      const ui = await $.ui.mount({ plugin: 'quick-actions', surface, ...SESSION_MODE })
++const run = ($: any, command: string, origin: any) => $.command.run({ command, args: '', origin })
+ 
+-      expect(await ui.find({ type: 'Button', text: /Compact/ })).toBeDefined()
+-      expect(await ui.find({ type: 'Button', text: /Clear/ })).toBeDefined()
+-      await ui.unmount()
+-    }
+-  })
+-
+-  test('a button asks first; Confirm runs the command, Cancel changes nothing', async ($, on) => {
++describe('quick-actions', () => {
++  test('VS Code: a typed /clear asks first; Скасувати stops it, Підтвердити lets it run', async ($, on) => {
+     const ran: string[] = []
+     const asked: string[] = []
+-    let answer = 'Cancel'
++    let answer = 'Скасувати'
+     stubs(on, () => answer, ran, asked)
+-    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+-
+-    const ui = await $.ui.mount({ plugin: 'quick-actions', surface: 'desktop', ...SESSION_MODE })
+-
+-    await ui.press({ key: 'qa-compact' })
+-    expect(asked[0]).toContain('Compact the conversation')
+-    expect(ran).toEqual([])
+-
+-    answer = 'Confirm'
+-    await ui.press({ key: 'qa-clear' })
+-    expect(asked[1]).toContain('Clear the whole conversation')
+-    expect(ran).toEqual(['clear:plugin'])
+-    await ui.unmount()
+-  })
+-
+-  test('VS Code: a typed /clear asks first; Cancel stops it, Confirm lets it run', async ($, on) => {
+-    const ran: string[] = []
+-    let answer = 'Cancel'
+-    stubs(on, () => answer, ran)
+     await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' })
+ 
+-    const cancelled: any = await $.command.run({ command: 'clear', args: '', origin: { kind: 'composer' } })
++    const stopped = await run($, 'clear', { kind: 'composer' })
+ 
+-    expect(cancelled.text).toContain('cancelled')
++    expect(asked[0]).toContain('Очистити всю розмову')
++    expect(stopped.text).toContain('скасовано')
+     expect(ran).toEqual([])
+ 
+-    answer = 'Confirm'
++    answer = 'Підтвердити'
++    await run($, 'compact', { kind: 'composer' })
+ 
+-    const confirmed: any = await $.command.run({ command: 'clear', args: '', origin: { kind: 'composer' } })
+-
+-    expect(confirmed.text).toBe('clear done')
+-    expect(ran).toEqual(['clear:composer'])
++    expect(ran).toEqual(['compact:composer'])
+   })
+ 
+-  test('a dismissed dialog counts as Cancel', async ($, on) => {
++  test('a dismissed dialog counts as Скасувати', async ($, on) => {
+     const ran: string[] = []
+     stubs(on, new Error('dismissed'), ran)
+     await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' })
+ 
+-    const out: any = await $.command.run({ command: 'compact', args: '', origin: { kind: 'composer' } })
++    await run($, 'clear', { kind: 'composer' })
+ 
+-    expect(out.text).toContain('cancelled')
+     expect(ran).toEqual([])
+   })
+ 
+-  test('on desktop a typed /clear is not asked by default, and a plugin run is never asked', async ($, on) => {
++  test('on desktop a typed /clear is not asked, and a plugin run is never asked', async ($, on) => {
+     const ran: string[] = []
+     const asked: string[] = []
+-    stubs(on, 'Confirm', ran, asked)
++    stubs(on, 'Підтвердити', ran, asked)
+     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
++    await run($, 'clear', { kind: 'composer' })
+ 
+-    await $.command.run({ command: 'clear', args: '', origin: { kind: 'composer' } })
++    await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' })
++    await run($, 'compact', { kind: 'plugin', name: 'hud' })
+ 
+     expect(asked).toEqual([])
+-    expect(ran).toEqual(['clear:composer'])
+-  })
+-
+-  test('confirmTypedCommands: always asks on every surface, but not for a plugin run', { options: { confirmTypedCommands: 'always' } }, async ($, on) => {
+-    const ran: string[] = []
+-    const asked: string[] = []
+-    stubs(on, 'Confirm', ran, asked)
+-    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+-
+-    await $.command.run({ command: 'compact', args: '', origin: { kind: 'composer' } })
+-
+-    expect(asked).toHaveLength(1)
+-
+-    await $.command.run({ command: 'compact', args: '', origin: { kind: 'plugin', name: 'quick-actions' } })
+-
+-    expect(asked).toHaveLength(1)
+-    expect(ran).toEqual(['compact:composer', 'compact:plugin'])
++    expect(ran).toEqual(['clear:composer', 'compact:plugin'])
+   })
+ })
+diff --git oldquick-actions/tsconfig.json newquick-actions/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldquick-actions/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git oldplan-progress/.claude-plugin/plugin.json new/plan-progress/.claude-plugin/plugin.json
+index cf65cc2..f38c1c3 100644
+--- oldplan-progress/.claude-plugin/plugin.json
++++ new/plan-progress/.claude-plugin/plugin.json
+@@ -1,8 +1,11 @@
+ {
+   "name": "plan-progress",
+-  "version": "0.7.6",
+-  "description": "Live plan progress bars above the Claude Code prompt: stages, steps, a pixel fill and soft sounds for decision, error and done",
+-  "author": { "name": "Kirill Serditov", "url": "https://github.com/zycck" },
++  "version": "0.7.6-qa.5",
++  "description": "Live plan progress bars above the Claude Code prompt: stages, steps, a pixel fill and soft sounds for decision, error and done (qa-mods fork: a wider title, the full title on hover, Ukrainian interface)",
++  "author": {
++    "name": "Kirill Serditov (fork: noaod)",
++    "url": "https://github.com/zycck"
++  },
+   "license": "MIT",
+   "types": "./types/index.d.ts"
+ }
+diff --git oldplan-progress/.in_use/96347 newplan-progress/.in_use/96347
+deleted file mode 100644
+index 0ca904d..0000000
+--- oldplan-progress/.in_use/96347
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96347,"procStart":"Tue Oct  6 21:24:18 2026"}
+\ No newline at end of file
+diff --git oldplan-progress/.in_use/96679 newplan-progress/.in_use/96679
+deleted file mode 100644
+index 15b1f95..0000000
+--- oldplan-progress/.in_use/96679
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96679,"procStart":"Tue Oct  6 21:26:25 2026"}
+\ No newline at end of file
+diff --git oldplan-progress/.in_use/97163 newplan-progress/.in_use/97163
+deleted file mode 100644
+index 28ecc03..0000000
+--- oldplan-progress/.in_use/97163
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":97163,"procStart":"Tue Oct  6 21:28:31 2026"}
+\ No newline at end of file
+diff --git oldplan-progress/.orphaned_at newplan-progress/.orphaned_at
+deleted file mode 100644
+index 8c1becb..0000000
+--- oldplan-progress/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791324076574
+\ No newline at end of file
+diff --git old/plan-progress/LICENSE.upstream new/plan-progress/LICENSE.upstream
+new file mode 100644
+index 0000000..5ac90be
+--- /dev/null
++++ new/plan-progress/LICENSE.upstream
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Kirill Serditov
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git old/plan-progress/NOTICE.md new/plan-progress/NOTICE.md
+new file mode 100644
+index 0000000..6ddc32c
+--- /dev/null
++++ new/plan-progress/NOTICE.md
+@@ -0,0 +1,11 @@
++Fork of `plan-progress` 0.7.6 from github.com/zycck/claude-mods (MIT, author: Kirill Serditov; upstream commit ace3350, 2026-10-06). The upstream licence is in `LICENSE.upstream`.
++The plugin name stays `plan-progress`, so the tool is still `mcp__plan-progress__plan_progress` and the skill `plan-progress:plan-progress`. Install this INSTEAD of `plan-progress@zycck-mods`, never next to it (two copies would draw two bars and register the same tool).
++Changes in `hooks/register.tsx` (desktop drawing only; the terminal path is untouched):
++1. (0.7.6-qa.1) The title width estimate used 6.4 px per character, too narrow for Cyrillic (~9.6 px), so titles were cut after a few letters while the track kept over a thousand px. Cyrillic letters now count 9.2 px (`textWidth`), Latin keeps 6.7, and a title may take up to 40% of the band (was 30%).
++2. (0.7.6-qa.1) Hovering the title shows a card with the full title and the same status text the alt text carries (stage, step, percent, note). A keyed `Box` is the hover scope; the card is an absolute `Box` with `display: none` that hover turns to `flex`.
++3. (0.7.6-qa.2) The interface is Ukrainian: the footer button (`Прогрес`, `Прогрес 2`), the first-start toast, the descriptions and answers of `/progress` and `/progress-clear`, the agents bar (`Агенти`, `N працює`, `ще N агентів · M готово` with Ukrainian plural forms), the hover text of a bar (`готово, 3 кроки за 2х 20с`, `крок 1 з 2`), default titles (`План`, `Крок`, `Завдання`) and the clock units: `с`, `х`, `г` instead of `s`, `m`, `h` (one letter each, so the clock keeps its width). **Not translated on purpose:** `RULES` and the hook messages that are addressed to the model (denials, "still open", tool description and its parameters), the skill text, and the agent state words (`running`, `done`) in a hover text of a strip. `tests/regress.mjs` expects the Ukrainian units.
++4. (0.7.6-qa.3) The footer row of the `Progress` button has `flexShrink={0}`, so the host does not squeeze it into `…` next to the Compact and Clear buttons (attempt; not yet seen live).
++5. (0.7.6-qa.4) The Windows PowerShell sound fallback is removed (`play()` is one `$.audio.play` call). The `sounds/*.wav` stay: the engine's player (afplay on macOS) uses them.
++6. (0.7.6-qa.5) The footer `Progress` button (the `SessionMode` hook) is removed; the hud band has a `Прогрес` button that runs `/progress` (the toggle and its texts are unchanged; pressed from a plugin it answers with a toast, not a transcript line). `tests/regress.mjs` expects no footer buttons.
++To take a newer upstream version: diff upstream `plugins/plan-progress/hooks/register.tsx` against this one and re-apply the six changes by hand.
++Tests: the upstream `tests/regress.mjs` still passes; `tests/qa-fork.mjs` is ours (hover card, title room). Compile `register.tsx` to `tests/register.mjs` as `tests/README.md` says; without a global TypeScript use Bun: `new Bun.Transpiler({ loader: 'tsx', tsconfig: JSON.stringify({ compilerOptions: { jsx: 'react', jsxFactory: 'h' } }) })`, then replace `from 'claude-code'` with `from './stub.mjs'`.
+diff --git oldplan-progress/hooks/register.tsx new/plan-progress/hooks/register.tsx
+index bef0f4b..e78e1ae 100644
+--- oldplan-progress/hooks/register.tsx
++++ new/plan-progress/hooks/register.tsx
+@@ -100,7 +100,7 @@ function normalize(input: Raw, prev: Plan | null, now: number, id: string): Plan
+     .map(s => ({
+       name: str(s.name, 80) || 'Stage',
+       steps: list(s.steps).map(st => ({
+-        title: str(st.title) || 'Step',
++        title: str(st.title) || 'Крок',
+         status: status(st.status),
+         substeps: list(st.substeps).map(sub => ({ title: str(sub.title) || '…', status: status(sub.status) })),
+       })),
+@@ -114,7 +114,7 @@ function normalize(input: Raw, prev: Plan | null, now: number, id: string): Plan
+     const titles = stages.flatMap(s => s.steps.map(st => st.title)).join(', ')
+     return `plan_progress: "${id}" has no step ${missing.map(t => `"${str(t, 60)}"`).join(', ')}. Its steps: ${titles.slice(0, 400)}`
+   }
+-  const title = str(input.title, 80) || prev?.title || 'Plan'
++  const title = str(input.title, 80) || prev?.title || 'План'
+   const steps = stages.flatMap(s => s.steps)
+   const isAllDone = steps.length > 0 && steps.every(s => isFinished(s.status))
+   const asked = input.state as PlanState
+@@ -208,12 +208,12 @@ function parsePlan(markdown: string, now: number): Plan | null {
+       }
+       stages = stages.map(s => (s.steps.length ? s : { ...s, steps: [{ title: s.name, status: 'pending', substeps: [] }] }))
+     } else if (items.length > 0) {
+-      stages = [{ name: 'Tasks', steps: items.map(i => ({ title: i.text, status: i.status, substeps: [] })) }]
++      stages = [{ name: 'Завдання', steps: items.map(i => ({ title: i.text, status: i.status, substeps: [] })) }]
+     }
+   }
+   if (stages.length === 0) return null
+ 
+-  return { id: PLAN_ID, title: title || 'Plan', kind: stages.length === 1 ? 'todo' : 'plan', stages, state: 'running', note: null, startedAt: now }
++  return { id: PLAN_ID, title: title || 'План', kind: stages.length === 1 ? 'todo' : 'plan', stages, state: 'running', note: null, startedAt: now }
+ }
+ 
+ function st(title: string, s: StepStatus): PlanStep {
+@@ -242,7 +242,7 @@ const hash = (a: number, b: number, k: number) => {
+   const x = Math.sin(a * 127.1 + b * 311.7 + k * 74.7) * 43758.5453
+   return x - Math.floor(x)
+ }
+-const textWidth = (s: string, px = 6.7) => [...s].reduce((w, ch) => w + (/[　-鿿]/.test(ch) ? 12 : /[ilI.,:;'|!]/.test(ch) ? 3.4 : /[mwMWШЩЖМ]/.test(ch) ? 9.5 : px), 0)
++const textWidth = (s: string, px = 6.7) => [...s].reduce((w, ch) => w + (/[　-鿿]/.test(ch) ? 12 : /[ilI.,:;'|!]/.test(ch) ? 3.4 : /[mwMWШЩЖМ]/.test(ch) ? 9.5 : /[Ѐ-ӿ]/.test(ch) ? 9.2 : px), 0)
+ 
+ const ICON_PATH: Partial<Record<PlanState, string>> = {
+   needs_input: 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01',
+@@ -280,7 +280,7 @@ const SEE_THROUGH = '<style>:root,html,body{background:transparent!important;col
+ // reloads the frame and everything in it blinks): each digit is a reel of its figures behind a one-line window,
+ // stepped by a CSS animation whose negative delay is the time already run. Plain SVG, since the host's frame
+ // drops foreignObject. {{T:start}} becomes those seconds on every draw (liveSource)
+-const CLOCK_W = 48 // "59m 59s"
++const CLOCK_W = 48 // "59х 59с"
+ const LINE = 16
+ const CLOCK_CSS = `.ckt{font-variant-numeric:tabular-nums}
+ .rs1{animation:r10 10s steps(10) var(--d) infinite}.rs10{animation:r6 60s steps(6) var(--d) infinite}
+@@ -303,11 +303,11 @@ function liveClock(x: number, top: number, start: number, cls: string, textCls:
+   const tens = ['', ...digits.slice(1)]
+   const id = `ck${start}x${Math.round(x)}y${Math.round(top)}`
+   const minutes =
+-    `<g class="ph1"><g class="rmm">${reel(x + 3.5, tens, 'rm10')}${reel(x + 10.5, digits, 'rm1')}${unit(x + 14, 'm')}</g>` +
+-    `${reel(x + 31, digits.slice(0, 6), 'rs10')}${reel(x + 38, digits, 'rs1')}${unit(x + 41.5, 's')}</g>`
++    `<g class="ph1"><g class="rmm">${reel(x + 3.5, tens, 'rm10')}${reel(x + 10.5, digits, 'rm1')}${unit(x + 14, 'х')}</g>` +
++    `${reel(x + 31, digits.slice(0, 6), 'rs10')}${reel(x + 38, digits, 'rs1')}${unit(x + 41.5, 'с')}</g>`
+   const hours =
+-    `<g class="ph2">${reel(x + 3.5, tens, 'rh10')}${reel(x + 10.5, digits, 'rh1')}${unit(x + 14, 'h')}` +
+-    `${reel(x + 31, digits.slice(0, 6), 'rm6')}${reel(x + 38, digits, 'rm1')}${unit(x + 41.5, 'm')}</g>`
++    `<g class="ph2">${reel(x + 3.5, tens, 'rh10')}${reel(x + 10.5, digits, 'rh1')}${unit(x + 14, 'г')}` +
++    `${reel(x + 31, digits.slice(0, 6), 'rm6')}${reel(x + 38, digits, 'rm1')}${unit(x + 41.5, 'х')}</g>`
+   return (
+     `<style>.${id}{--d:-{{T:${start}}}s}</style><g class="${cls} ${id}"><clipPath id="${id}"><rect x="${(x - 2).toFixed(1)}" y="${top}" width="${CLOCK_W + 4}" height="${LINE}"/></clipPath>` +
+     `<g clip-path="url(#${id})"${isCentered ? ' class="cc"' : ''}>${minutes}${hours}</g></g>`
+@@ -504,7 +504,7 @@ const AGENT_COLOR: Record<AgentRun['state'], string> = {
+ // the desktop drops an Svg whose alt is empty, so every drawing says what it shows
+ function stripAlt(p: Plan, key: string): string {
+   const a = (p.agents ?? []).find(x => x.id === key)
+-  return a ? `agent ${a.title}: ${a.state}, ${a.tool}` : 'more agents'
++  return a ? `агент ${a.title}: ${a.state}, ${a.tool}` : 'ще агенти'
+ }
+ 
+ // an unfinished bar stops at 99%: 199 of 200 steps would otherwise round up to 100%
+@@ -515,8 +515,8 @@ function percent(p: Plan, w: { pos: number; total: number }): number {
+ 
+ const elapsed = (ms: number) => {
+   const sec = Math.max(0, Math.round(ms / 1000))
+-  if (sec < 60) return `${sec}s`
+-  return sec < 3600 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
++  if (sec < 60) return `${sec}с`
++  return sec < 3600 ? `${Math.floor(sec / 60)}х ${sec % 60}с` : `${Math.floor(sec / 3600)}г ${Math.floor((sec % 3600) / 60)}х`
+ }
+ 
+ // which strips show: all of a small batch; in a big one the unfinished first, the rest folded into one line
+@@ -635,7 +635,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
+       html:
+         gutter(y, `+${v.hidden.length}`, '#8A8984') +
+         `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#808080" fill-opacity=".14"/>` +
+-        `<text x="${GUTTER + 10}" y="${y + 11.5}" class="sn st">${plural(v.hidden.length, 'more agent')} · ${doneCount} done</text>`,
++        `<text x="${GUTTER + 10}" y="${y + 11.5}" class="sn st">ще ${plural(v.hidden.length, ['агент', 'агенти', 'агентів'])} · ${doneCount} готово</text>`,
+     })
+   }
+   return rows
+@@ -650,8 +650,13 @@ const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,s
+ ${CLOCK_CSS}
+ @media (prefers-reduced-motion:reduce){.sd,.mi,.mo,.t0,.t1,.t2,.t3{animation:none}.mo{opacity:0}}</style>`
+ 
+-function plural(n: number, word: string) {
+-  return `${n} ${word}${n === 1 ? '' : 's'}`
++// Ukrainian plural: 1 агент, 2-4 агенти, 5+ і 11-14 агентів
++function plural(n: number, forms: [string, string, string]) {
++  const m10 = n % 10
++  const m100 = n % 100
++  const form = m10 === 1 && m100 !== 11 ? forms[0] : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? forms[1] : forms[2]
++
++  return `${n} ${form}`
+ }
+ 
+ const DEFAULT = 0x01000000
+@@ -871,7 +876,7 @@ function stripCells(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now
+     const tint = mix(back, [128, 128, 128], 0.16)
+     pill(g, y, 0, W, () => tint)
+     const doneCount = v.hidden.filter(a => a.state === 'done').length
+-    g.text(2, y, fit(`+${plural(v.hidden.length, 'more agent')} · ${doneCount} done`, W - 4), pack(mix(termFg(), tint, 0.35)), pack(tint))
++    g.text(2, y, fit(`+ще ${plural(v.hidden.length, ['агент', 'агенти', 'агентів'])} · ${doneCount} готово`, W - 4), pack(mix(termFg(), tint, 0.35)), pack(tint))
+   }
+   return { cells: g.encode(), rows }
+ }
+@@ -977,23 +982,13 @@ async function animate($: EngineInterface) {
+ 
+ // ---------- engine glue ----------
+ 
+-// the engine's player first (afplay on macOS); PowerShell where it cannot play
++// the engine's player (afplay on macOS); the Windows PowerShell fallback of upstream is removed in the qa-mods fork
+ // set while a demo reel records: every sound with its moment, so a video can carry them
+ let soundLog: { at: number; name: string }[] | null = null
+ 
+ function play($: EngineInterface, name: 'decision' | 'error' | 'done') {
+   if (soundLog) void $.clock.now().then(at => soundLog?.push({ at, name }))
+-  const file = `${$.plugin.root}/sounds/${name}.wav`.replace(/\//g, '\\')
+-  const viaPowerShell = () =>
+-    $.process
+-      .run(['powershell', '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `(New-Object Media.SoundPlayer '${file}').PlaySync()`], { timeoutMs: 5000 })
+-      .catch(() => undefined)
+-  // on Windows the engine's player can report success and stay silent, so the system player plays it directly
+-  if (/^[A-Za-z]:/.test($.plugin.root)) {
+-    void viaPowerShell()
+-    return
+-  }
+-  void $.audio.play({ asset: `sounds/${name}.wav` }).catch(viaPowerShell)
++  void $.audio.play({ asset: `sounds/${name}.wav` }).catch(() => undefined)
+ }
+ 
+ // the agents bar is the mod's own; the model never owes it an update
+@@ -1079,7 +1074,7 @@ function syncAuto(p: Plan, now: number): Plan {
+     : agents.some(a => a.state === 'waiting') ? 'needs_input' : 'running'
+   // the pill says how many are still at work; the bar's title already says "Agents"
+   const running = agents.filter(a => a.state === 'running' || a.state === 'waiting').length
+-  return { ...p, agentsDoneAt, stages: [{ name: isOver ? 'Agents' : `${running} running`, steps }], state }
++  return { ...p, agentsDoneAt, stages: [{ name: isOver ? 'Агенти' : `${running} працює`, steps }], state }
+ }
+ 
+ function addRun(p: Plan, run: AgentRun, parentId: string | undefined, now: number): Plan {
+@@ -1442,8 +1437,8 @@ export const register: Register = on => {
+       foldUntil = 0
+       if (await read($, isOpen)) await update($, tick, n => n + 1)
+     })
+-    await $.command.register({ name: 'progress', description: 'Show or hide the progress bars' })
+-    await $.command.register({ name: 'progress-clear', description: 'Remove all progress bars' })
++    await $.command.register({ name: 'progress', description: 'Показати або сховати смуги прогресу' })
++    await $.command.register({ name: 'progress-clear', description: 'Прибрати всі смуги прогресу' })
+ 
+     return next(e)
+   })
+@@ -1511,41 +1506,27 @@ export const register: Register = on => {
+     return { ...ran, context: [...(ran.context ?? []), `plan-progress: bar "${PLAN_ID}" shows this plan; move it with {id:"${PLAN_ID}", next:true} as steps finish.`] }
+   })
+ 
+-  on('command.run', { command: 'progress' }, async $ => {
+-    if ((await read($, plans)).length === 0) return { text: 'No plan yet. A bar appears when Claude starts a task with several steps.' }
++  on('command.run', { command: 'progress' }, async ($, e) => {
++    // pressed from the hud band (origin plugin): a toast is enough, the transcript stays clean
++    const say = (text: string) => (e.origin.kind === 'plugin' ? ($.ui.toast(text), { text: '' }) : { text })
++
++    if ((await read($, plans)).length === 0) return say('Плану ще немає. Смуга з’явиться, коли Claude почне завдання з кількох кроків.')
++
+     const open = await read($, isOpen)
++
+     await update($, isOpen, () => !open)
+ 
+-    return { text: open ? 'Progress bars hidden.' : 'Progress bars shown.' }
++    return say(open ? 'Смуги прогресу сховано.' : 'Смуги прогресу показано.')
+   })
+ 
+   on('command.run', { command: 'progress-clear' }, async $ => {
+     glide.clear()
+     await update($, plans, () => [])
+ 
+-    return { text: 'Progress bars removed.' }
++    return { text: 'Смуги прогресу прибрано.' }
+   })
+ 
+-  // drawn wherever it can be pressed, so the person sees the mod is loaded; dim while there is nothing to show
+-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+-    if (e.surface === 'terminal' && e.viewport?.isFullscreen !== true) return next(e)
+-    const count = (await read($, plans)).length
+-    const open = await read($, isOpen)
+-    const { Box, Button } = $.ui.resolve(e)
+-    // other mods add their labels to modes beneath us; keep them
+-    const below = await next(e)
+-    const press = () =>
+-      count === 0
+-        ? $.ui.toast('plan-progress is on. A bar appears when Claude starts a task with several steps.')
+-        : update($, isOpen, () => !open)
+-
+-    return (
+-      <Box flexDirection="row" alignItems="center" gap={1}>
+-        <Button key="progress-toggle" dimColor={count === 0 || !open} label={count > 1 ? `Progress ${count}` : 'Progress'} onPress={press} />
+-        {below}
+-      </Box>
+-    )
+-  })
++  // the footer button is gone in the qa-mods fork: the hud band has `Прогрес`, which runs /progress
+ 
+   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+     const list = await read($, plans)
+@@ -1603,7 +1584,9 @@ export const register: Register = on => {
+     // every bar has the same width and is pinned to the right edge (fixed-width percent, close button),
+     // so rows line up whatever their titles; the slack goes into the gap after the title.
+     // Desktop reports ~8 CSS px per column; glyph, gaps, percent and the close button take ~126 px.
+-    const titleWidth = Math.min(Math.round(total * 0.3), Math.max(...list.map(p => Math.round(textWidth(p.title, 6.4)))))
++    // fork (qa-mods): the 6.4 px per character estimate was too narrow for Cyrillic (~9.2 px, now counted per letter), so titles were cut after
++    // a few letters; use the wider estimate and let a title take up to 40% of the band
++    const titleWidth = Math.min(Math.round(total * 0.4), Math.max(...list.map(p => Math.round(textWidth(p.title)))))
+     const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140))
+     await read($, tick)
+     const now = await $.clock.now()
+@@ -1627,7 +1610,7 @@ export const register: Register = on => {
+                 />
+               ))
+             : []
+-          const agentsAlt = v ? `; agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}` : ''
++          const agentsAlt = v ? `; агенти: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}` : ''
+           const line = i > 0 && Svg ? [<Svg key={`div-${p.id}`} source={divider} alt="divider" width={total} height={1} />] : []
+           const w = where(p)
+           const pct = percent(p, w)
+@@ -1635,22 +1618,28 @@ export const register: Register = on => {
+           const stageName = p.stages[w.stage]?.name ?? ''
+           const alt =
+             p.state === 'done'
+-              ? `${p.title}: done, ${plural(w.total, 'step')}${p.endedAt ? ` in ${elapsed(p.endedAt - p.startedAt)}` : ''}`
+-              : `${p.title}: ${stageName}, step ${w.step} of ${w.stageSize}, ${pct}%${p.note ? ` — ${p.note}` : ''}${agentsAlt}`
++              ? `${p.title}: готово, ${plural(w.total, ['крок', 'кроки', 'кроків'])}${p.endedAt ? ` за ${elapsed(p.endedAt - p.startedAt)}` : ''}`
++              : `${p.title}: ${stageName}, крок ${w.step} з ${w.stageSize}, ${pct}%${p.note ? ` — ${p.note}` : ''}${agentsAlt}`
+           const bar = `${'━'.repeat(Math.round(pct / 4))}${'─'.repeat(25 - Math.round(pct / 4))}`
+ 
+           return [
+             ...line,
+             <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
+               <Text color={color}>{STATE_GLYPH[p.state]}</Text>
+-              <Text wrap="truncate">{p.title}</Text>
++              <Box key={`title-${p.id}`} flexShrink={1}>
++                <Text wrap="truncate">{p.title}</Text>
++                <Box position="absolute" top={-3} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column" paddingX={1} borderStyle="round">
++                  <Text bold>{p.title}</Text>
++                  <Text dimColor>{alt.slice(p.title.length + 2) || alt}</Text>
++                </Box>
++              </Box>
+               <Box flexGrow={1} />
+               {Svg ? (
+                 <Box flexDirection="column" flexShrink={0}>
+                   <Box key={`track-${p.id}`}>
+                     <Svg source={track.base} alt={alt} width={trackW} height={TRACK_H} />
+                     <Box position="absolute" top={0} left={0}>
+-                      <Svg source={hover} alt={`${p.title}: hover for times`} width={trackW} height={TRACK_H} isInteractive />
++                      <Svg source={hover} alt={`${p.title}: наведи, щоб побачити час`} width={trackW} height={TRACK_H} isInteractive />
+                     </Box>
+                   </Box>
+                   {strips}
+@@ -1692,7 +1681,7 @@ export const register: Register = on => {
+     await update($, plans, list => {
+       if (list.some(p => p.id === home)) return list.map(p => (p.id === home ? addRun(p, run, e.parentAgentId, now) : p))
+       isNew = true
+-      const auto: Plan = { id: AGENTS, title: 'Agents', kind: 'todo', stages: [], state: 'running', note: null, startedAt: now }
++      const auto: Plan = { id: AGENTS, title: 'Агенти', kind: 'todo', stages: [], state: 'running', note: null, startedAt: now }
+       return placeBar(list, addRun(auto, run, undefined, now))
+     })
+     // known only once its strip is stored, so the cleanup in the clock never sees a home without the agent
+diff --git old/plan-progress/tests/qa-fork.mjs new/plan-progress/tests/qa-fork.mjs
+new file mode 100644
+index 0000000..0515853
+--- /dev/null
++++ new/plan-progress/tests/qa-fork.mjs
+@@ -0,0 +1,37 @@
++// qa-mods fork: the title gets room, and a hover card carries the full title and the status.
++// run: compile register.tsx to register.mjs (see README.md), then `node qa-fork.mjs`
++import assert from 'node:assert/strict'
++import { boot, S, st } from './engine.mjs'
++
++const E = await boot('./register.mjs')
++const TITLE = 'Тест: прогресс-бар, скрепка и next steps'
++await E.call({ id: 'a', title: TITLE, stages: [S('Проверка', st('Первый', 'active'), 'Второй')] })
++
++const render = cols => E.raw('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: cols, hasSurvey: false } })
++const collect = tree => {
++  const out = { cards: [], texts: [] }
++  const walk = n => {
++    if (Array.isArray(n)) return n.forEach(walk)
++    if (!n || typeof n !== 'object') return
++    if (n.type === 'Box' && n.props?.hover && n.props?.display === 'none') out.cards.push(n)
++    if (n.type === 'Text') out.texts.push(...[].concat(n.children ?? []).filter(c => typeof c === 'string'))
++    ;(n.children ?? []).forEach(walk)
++  }
++  walk(tree)
++  return out
++}
++
++const { cards, texts } = collect(await render(120))
++assert.equal(cards.length, 1, 'one hover card per bar')
++assert.equal(cards[0].props.hover.display, 'flex', 'the card appears on hover')
++assert.equal(cards[0].props.position, 'absolute', 'the card does not move its neighbours')
++const inCard = collect(cards[0]).texts
++assert.ok(inCard.includes(TITLE), 'the card shows the whole title')
++assert.ok(inCard.some(t => /Проверка/.test(t) && /%/.test(t)), 'the card shows the stage and the percent')
++assert.ok(texts.filter(t => t === TITLE).length >= 2, 'the title is also drawn in the row (cut by the app when it does not fit)')
++console.log('ok   qa_fork_hover_card_has_full_title_and_status')
++
++// the track leaves the title room: at 120 columns the title takes about 330 px (it was ~100) and the track the rest
++const w = (await E.svgs()).find(x => x.alt.startsWith(TITLE + ':')).width
++assert.ok(w > 300 && w < 700, `track width ${w}`)
++console.log('ok   qa_fork_title_room_track_width', w)
+diff --git oldplan-progress/tests/regress.mjs new/plan-progress/tests/regress.mjs
+index 2dd7267..2ce6b1f 100644
+--- oldplan-progress/tests/regress.mjs
++++ new/plan-progress/tests/regress.mjs
+@@ -258,7 +258,7 @@ const C = {
+     E.tick(125_000)
+     await E.call({ id: 't', state: 'done' })
+     const src = (await E.view('t')).source
+-    return [`2m 5s ${src.includes('2m 5s')}, no clock ${!src.includes('class="kc0 ')}`, src.includes('2m 5s') && !src.includes('class="kc0 ')]
++    return [`2х 5с ${src.includes('2х 5с')}, no clock ${!src.includes('class="kc0 ')}`, src.includes('2х 5с') && !src.includes('class="kc0 ')]
+   },
+   async strips_clock_live_then_static(E) {
+     await create(E)
+@@ -267,7 +267,7 @@ const C = {
+     const live = (await E.view('t')).source.includes('class="sc ')
+     await E.turnComplete('ag1')
+     const src = (await E.view('t')).source
+-    return [`live ${live}, finished shows 12s ${src.includes('>12s<')}`, live && src.includes('>12s<') && !src.includes('class="sc ')]
++    return [`live ${live}, finished shows 12с ${src.includes('>12с<')}`, live && src.includes('>12с<') && !src.includes('class="sc ')]
+   },
+   async agent_change_redraws_only_its_strip(E) {
+     await create(E)
+@@ -404,7 +404,7 @@ const C = {
+     const anchored = /text-anchor="end"[^>]*>Read</.test(desk)
+     const r = (await E.terminal(110)).find(n => n.type === 'Raster' && n.props.key === 'strips-t')
+     const row = glyphs(r.props.cells).replace(/[⠀-⣿]/g, ' ')
+-    const term = /architecture \(haiku 4\.5 · high\) +Read \d+s/.test(row)
++    const term = /architecture \(haiku 4\.5 · high\) +Read \d+с/.test(row)
+     return [`desktop full name ${full}, tool at right ${anchored}, terminal ${term}`, full && anchored && term]
+   },
+   async auto_mode_ask_is_not_needs_approval(E) {
+@@ -613,7 +613,8 @@ const C = {
+     const foot = async fs => (await E.footer('terminal', fs)).filter(n => n.type === 'Button').length
+     const desk = (await E.footer('desktop', undefined)).filter(n => n.type === 'Button').length
+     const r = [await band(false), await band(true), await foot(false), await foot(true), desk]
+-    return [`band ${r[0]}/${r[1]}, footer ${r[2]}/${r[3]}, desktop ${r[4]}`, r.join() === '0,1,0,1,1']
++    // the footer button moved to the hud band in the qa-mods fork: no footer buttons anywhere
++    return [`band ${r[0]}/${r[1]}, footer ${r[2]}/${r[3]}, desktop ${r[4]}`, r.join() === '0,1,0,0,0']
+   },
+   async desktop_still_draws_svg(E) {
+     await create(E)
+@@ -626,7 +627,7 @@ const C = {
+     await create(E)
+     await E.spawn('ag1', 'Scan tests')
+     const src = (await E.view('t')).strips.join('')
+-    const ok = /class="ph1"/.test(src) && /class="ph2"/.test(src) && />h<\/text>/.test(src) && /\.ph2\{animation:hm 3600s/.test(src)
++    const ok = /class="ph1"/.test(src) && /class="ph2"/.test(src) && />г<\/text>/.test(src) && /\.ph2\{animation:hm 3600s/.test(src)
+     return [`minutes face ${/class="ph1"/.test(src)}, hours face ${/class="ph2"/.test(src)}`, ok]
+   },
+   async resend_keeps_a_repeated_title_open(E) {
+diff --git oldsandbox-guard/.claude-plugin/plugin.json new/sandbox-guard/.claude-plugin/plugin.json
+index 3e2eb76..2e440b3 100644
+--- oldsandbox-guard/.claude-plugin/plugin.json
++++ new/sandbox-guard/.claude-plugin/plugin.json
+@@ -1,6 +1,8 @@
+ {
+   "name": "sandbox-guard",
+-  "version": "0.1.4",
++  "version": "0.1.5",
+   "description": "Denies Edit/Write/Bash writes to Claude config paths the sandbox cannot write (settings, skills, plugins, hooks, projects, ...) and tells Claude to hand the user a ready Terminal command instead of trying workarounds.",
+-  "author": { "name": "noaod" }
++  "author": {
++    "name": "noaod"
++  }
+ }
+diff --git oldsandbox-guard/.in_use/96347 newsandbox-guard/.in_use/96347
+deleted file mode 100644
+index 0ca904d..0000000
+--- oldsandbox-guard/.in_use/96347
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96347,"procStart":"Tue Oct  6 21:24:18 2026"}
+\ No newline at end of file
+diff --git oldsandbox-guard/.in_use/96679 newsandbox-guard/.in_use/96679
+deleted file mode 100644
+index 15b1f95..0000000
+--- oldsandbox-guard/.in_use/96679
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96679,"procStart":"Tue Oct  6 21:26:25 2026"}
+\ No newline at end of file
+diff --git oldsandbox-guard/.in_use/97163 newsandbox-guard/.in_use/97163
+deleted file mode 100644
+index 28ecc03..0000000
+--- oldsandbox-guard/.in_use/97163
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":97163,"procStart":"Tue Oct  6 21:28:31 2026"}
+\ No newline at end of file
+diff --git oldsandbox-guard/.orphaned_at newsandbox-guard/.orphaned_at
+deleted file mode 100644
+index 558c309..0000000
+--- oldsandbox-guard/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791324078342
+\ No newline at end of file
+diff --git oldsandbox-guard/hooks/guard.ts new/sandbox-guard/hooks/guard.ts
+index 2657075..d022e5a 100644
+--- oldsandbox-guard/hooks/guard.ts
++++ new/sandbox-guard/hooks/guard.ts
+@@ -9,7 +9,7 @@ export const PROTECTED = [
+   '~/Library/Application Support/Claude/',
+ ]
+ 
+-const WRITEISH = /((?<![=>&\d-])>(?!=)|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\brm\b|\bmkdir\b|\btouch\b|\bchmod\b|\bln\b|\bnpm\s+(i|install)\b|\bbrew\s+install\b|\bpip3?\s+install\b)/
++const WRITEISH = /((?<![=>&-])>(?![=&])|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\brm\b|\bmkdir\b|\btouch\b|\bchmod\b|\bln\b|\bnpm\s+(i|install)\b|\bbrew\s+install\b|\bpip3?\s+install\b)/
+ 
+ function expand(p: string, home: string) {
+   return p.startsWith('~/') ? home + p.slice(1) : p
+@@ -58,15 +58,55 @@ export function stripHeredocs(cmd: string): string {
+ 
+ const maskQuotes = (s: string) => s.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""')
+ 
++const words = (seg: string) => [...seg.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map(m => m[1] ?? m[2] ?? m[3] ?? '')
++
++const COPY = new Set(['cp', 'mv', 'ln', 'install', 'rsync'])
++const EVERY = new Set(['rm', 'rmdir', 'unlink', 'shred', 'mkdir', 'touch', 'chmod', 'chown', 'tee', 'truncate'])
++
++/** The words a write verb in this segment writes to: the last argument of cp/mv/ln, every argument of rm/mkdir/tee, files of sed -i, redirect targets. */
++function writeTargets(seg: string): string[] {
++  const out = [...seg.matchAll(/(?<![=>&-])>>?(?![=&])\s*("[^"]*"|'[^']*'|\S+)/g)].map(m => m[1]!.replace(/^["']|["']$/g, ''))
++  const w = words(seg)
++
++  w.forEach((word, i) => {
++    const rest = w.slice(i + 1)
++    const args = rest.filter(x => !x.startsWith('-'))
++
++    if (COPY.has(word)) {
++      const dir = rest.findIndex(x => x === '-t')
++      const long = rest.find(x => x.startsWith('--target-directory='))
++
++      if (dir >= 0 && rest[dir + 1]) out.push(rest[dir + 1]!)
++      else if (long) out.push(long.slice('--target-directory='.length))
++      else if (args.length > 0) out.push(args[args.length - 1]!)
++    } else if (EVERY.has(word)) out.push(...args)
++    else if (word === 'sed' && rest.some(x => /^-\w*i/.test(x))) out.push(...args)
++  })
++
++  return out
++}
++
+ export function checkCommand(raw: string, home: string) {
+   // judge each shell segment alone: `cp a b && ls ~/.claude/projects` is a write and a read, not a write there
+   for (const seg of stripHeredocs(raw).split(/\n|;|&&|\|\||\|/)) {
++    const masked = maskQuotes(seg)
++
+     // the write verb must be real shell, not text inside a quoted string; the path itself may be quoted
+-    if (WRITEISH.test(maskQuotes(seg))) {
++    if (!WRITEISH.test(masked)) continue
++
++    // installers write somewhere we cannot name: any mention of a protected path counts
++    if (/\b(npm\s+(i|install)|brew\s+install|pip3?\s+install)\b/.test(masked)) {
+       const hit = protectedHit(seg, home)
+ 
+       if (hit) return hit
+     }
++
++    // other verbs: only a protected path that is written to counts; a source of cp/mv or an argument of cat is only read
++    for (const target of writeTargets(seg)) {
++      const hit = protectedHit(target, home)
++
++      if (hit) return hit
++    }
+   }
+ 
+   return null
+diff --git oldsandbox-guard/tests/guard.test.mjs new/sandbox-guard/tests/guard.test.mjs
+index 4952a4b..f477282 100644
+--- oldsandbox-guard/tests/guard.test.mjs
++++ new/sandbox-guard/tests/guard.test.mjs
+@@ -35,3 +35,16 @@ test('a write and a read of a protected path in different segments is not a writ
+   assert.equal(checkCommand('ls x | tee ~/.claude/skills/y', H), '~/.claude/skills/')
+   assert.equal(checkCommand('cp a ~/.claude/skills/b', H), '~/.claude/skills/')
+ })
++
++test('a protected path that is only read (the source of cp or mv) is not blocked', () => {
++  assert.equal(checkCommand('cp ~/.claude/plugins/cache/a/b.tsx ./b.tsx', H), null)
++  assert.equal(checkCommand('cp -R "$HOME/.claude/plugins/x/." mods/plugin/', H), null)
++  assert.equal(checkCommand('mv ~/.claude/skills/old.md /tmp/old.md', H), null)
++  assert.equal(checkCommand('cp a b ~/.claude/skills/', H), '~/.claude/skills/')
++  assert.equal(checkCommand('cp -t ~/.claude/skills/ a b', H), '~/.claude/skills/')
++  assert.equal(checkCommand('rm -rf ~/.claude/plugins/cache/x', H), '~/.claude/plugins/')
++  assert.equal(checkCommand("sed -i '' 's/a/b/' ~/.claude/settings.json", H), '~/.claude/settings')
++  assert.equal(checkCommand('cat ~/.claude/settings.json > ./copy.json', H), null)
++  assert.equal(checkCommand('ls ~/.claude/plugins >> out.txt', H), null)
++  assert.equal(checkCommand('python3 x.py 2> ~/.claude/projects/err.log', H), '~/.claude/projects/')
++})
+diff --git oldsandbox-guard/tsconfig.json newsandbox-guard/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldsandbox-guard/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git oldretry-analyzer/.claude-plugin/plugin.json new/retry-analyzer/.claude-plugin/plugin.json
+index 740a247..6f80582 100644
+--- oldretry-analyzer/.claude-plugin/plugin.json
++++ new/retry-analyzer/.claude-plugin/plugin.json
+@@ -1,6 +1,8 @@
+ {
+   "name": "retry-analyzer",
+-  "version": "0.1.0",
++  "version": "0.1.1",
+   "description": "Detects Claude repeating the same failing tool call (3+ identical failures, or 4+ with the same error) and tells it to change strategy and tell the user. Never blocks.",
+-  "author": { "name": "noaod" }
++  "author": {
++    "name": "noaod"
++  }
+ }
+diff --git oldretry-analyzer/.in_use/96347 newretry-analyzer/.in_use/96347
+deleted file mode 100644
+index 0ca904d..0000000
+--- oldretry-analyzer/.in_use/96347
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96347,"procStart":"Tue Oct  6 21:24:18 2026"}
+\ No newline at end of file
+diff --git oldretry-analyzer/.in_use/96679 newretry-analyzer/.in_use/96679
+deleted file mode 100644
+index 15b1f95..0000000
+--- oldretry-analyzer/.in_use/96679
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96679,"procStart":"Tue Oct  6 21:26:25 2026"}
+\ No newline at end of file
+diff --git oldretry-analyzer/.in_use/97163 newretry-analyzer/.in_use/97163
+deleted file mode 100644
+index 28ecc03..0000000
+--- oldretry-analyzer/.in_use/97163
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":97163,"procStart":"Tue Oct  6 21:28:31 2026"}
+\ No newline at end of file
+diff --git oldretry-analyzer/.orphaned_at newretry-analyzer/.orphaned_at
+deleted file mode 100644
+index d1795d6..0000000
+--- oldretry-analyzer/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791324083243
+\ No newline at end of file
+diff --git oldretry-analyzer/hooks/loop.ts new/retry-analyzer/hooks/loop.ts
+index 98ba98e..fbfe0b5 100644
+--- oldretry-analyzer/hooks/loop.ts
++++ new/retry-analyzer/hooks/loop.ts
+@@ -1,9 +1,9 @@
+ export const SAME_CALL = 3
+ export const SAME_ERROR = 4
+ 
+-/** Stable key of a call: tool plus its arguments, minus the per-call ids. */
++/** Stable key of a call: tool plus its arguments, minus the per-call ids and the free-text `description` (it changes between identical retries). */
+ export function signature(e: Record<string, unknown>): string {
+-  const rest = Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'tool_use_id' && k !== 'agentId'))
++  const rest = Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'tool_use_id' && k !== 'agentId' && k !== 'description'))
+ 
+   return JSON.stringify(rest).replace(/\s+/g, ' ').slice(0, 400)
+ }
+diff --git oldretry-analyzer/tests/loop.test.mjs new/retry-analyzer/tests/loop.test.mjs
+index 986fb7f..51c8bc6 100644
+--- oldretry-analyzer/tests/loop.test.mjs
++++ new/retry-analyzer/tests/loop.test.mjs
+@@ -33,3 +33,10 @@ test('reset clears everything', () => {
+   s.reset()
+   assert.equal(s.record('a', 'e', true), null)
+ })
++
++test('a changed free-text description does not make a retry look like a new call', () => {
++  const a = signature({ tool: 'Bash', command: 'ls /nope', description: 'Failing command, attempt 1' })
++
++  assert.equal(a, signature({ tool: 'Bash', command: 'ls /nope', description: 'Failing command, attempt 2' }))
++  assert.notEqual(a, signature({ tool: 'Bash', command: 'ls /other', description: 'Failing command, attempt 1' }))
++})
+diff --git oldretry-analyzer/tsconfig.json newretry-analyzer/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldretry-analyzer/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git oldevidence-saver/.claude-plugin/plugin.json new/evidence-saver/.claude-plugin/plugin.json
+index 7ec437d..750538d 100644
+--- oldevidence-saver/.claude-plugin/plugin.json
++++ new/evidence-saver/.claude-plugin/plugin.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "evidence-saver",
+-  "version": "0.2.1",
+-  "description": "Saves every image (screenshot) returned by a tool to a folder the user picks: the first screenshot asks for the path, the answer is remembered. /evidence-dir shows, sets or resets it; QA_EVIDENCE_DIR overrides it.",
++  "version": "0.3.0",
++  "description": "Saves every image (screenshot) returned by a tool to a folder the user picks: the first screenshot asks for the path, the answer is remembered. /evidence-dir shows, sets or resets it.",
+   "author": {
+     "name": "noaod"
+   }
+diff --git oldevidence-saver/.in_use/96347 newevidence-saver/.in_use/96347
+deleted file mode 100644
+index 0ca904d..0000000
+--- oldevidence-saver/.in_use/96347
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96347,"procStart":"Tue Oct  6 21:24:18 2026"}
+\ No newline at end of file
+diff --git oldevidence-saver/.in_use/96679 newevidence-saver/.in_use/96679
+deleted file mode 100644
+index 15b1f95..0000000
+--- oldevidence-saver/.in_use/96679
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96679,"procStart":"Tue Oct  6 21:26:25 2026"}
+\ No newline at end of file
+diff --git oldevidence-saver/.in_use/97163 newevidence-saver/.in_use/97163
+deleted file mode 100644
+index 28ecc03..0000000
+--- oldevidence-saver/.in_use/97163
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":97163,"procStart":"Tue Oct  6 21:28:31 2026"}
+\ No newline at end of file
+diff --git oldevidence-saver/.orphaned_at newevidence-saver/.orphaned_at
+deleted file mode 100644
+index 0bcf0fd..0000000
+--- oldevidence-saver/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791324086496
+\ No newline at end of file
+diff --git oldevidence-saver/hooks/register.ts new/evidence-saver/hooks/register.ts
+index 3b21961..4fef64c 100644
+--- oldevidence-saver/hooks/register.ts
++++ new/evidence-saver/hooks/register.ts
+@@ -10,7 +10,7 @@ const LATER = 'Ask me next time'
+ /**
+  * Evidence Saver: persists screenshots from tool results immediately, into a folder the
+  * user chooses. No default location: the first screenshot asks, the answer is remembered
+- * (`$.store`), `/evidence-dir` shows or changes it, `QA_EVIDENCE_DIR` overrides it.
++ * (`$.store`), `/evidence-dir` shows or changes it.
+  * Base64 goes to a temp text file via $.fs.write (no argv limit), python3 decodes it.
+  */
+ /** Absolute folder path from user input (`~/` expanded with home), or null. */
+@@ -59,7 +59,7 @@ export const register: Register = on => {
+       return { text: `Evidence Saver: screenshots will be saved to ${dir}` }
+     }
+ 
+-    const dir = String((await $.env.get('QA_EVIDENCE_DIR')) ?? '') || String((await $.store.get(KEY)) ?? '')
++    const dir = String((await $.store.get(KEY)) ?? '')
+ 
+     return { text: dir ? `Evidence Saver folder: ${dir}` : 'Evidence Saver: no folder set yet. Set one with /evidence-dir /absolute/path.' }
+   })
+@@ -72,7 +72,7 @@ export const register: Register = on => {
+       const images = findImages(ran)
+ 
+       if (images.length && !declined) {
+-        let dir = String((await $.env.get('QA_EVIDENCE_DIR')) ?? '') || String((await $.store.get(KEY)) ?? '')
++        let dir = String((await $.store.get(KEY)) ?? '')
+ 
+         if (!dir) {
+           const answer = await $.ui
+diff --git oldevidence-saver/tsconfig.json newevidence-saver/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldevidence-saver/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git oldnext-steps-uk/.claude-plugin/plugin.json new/next-steps-uk/.claude-plugin/plugin.json
+index 1121cb6..bf0e0f0 100644
+--- oldnext-steps-uk/.claude-plugin/plugin.json
++++ new/next-steps-uk/.claude-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "next-steps-uk",
+-  "version": "1.0.0-uk.4",
++  "version": "1.0.0-uk.5",
+   "description": "Fork of next-steps (MIT, Thariq Shihipar): suggested next prompts are always written in Ukrainian. Install INSTEAD of next-steps.",
+   "author": {
+     "name": "Thariq Shihipar"
+diff --git oldnext-steps-uk/.in_use/96347 newnext-steps-uk/.in_use/96347
+deleted file mode 100644
+index 0ca904d..0000000
+--- oldnext-steps-uk/.in_use/96347
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96347,"procStart":"Tue Oct  6 21:24:18 2026"}
+\ No newline at end of file
+diff --git oldnext-steps-uk/.in_use/96679 newnext-steps-uk/.in_use/96679
+deleted file mode 100644
+index 15b1f95..0000000
+--- oldnext-steps-uk/.in_use/96679
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":96679,"procStart":"Tue Oct  6 21:26:25 2026"}
+\ No newline at end of file
+diff --git oldnext-steps-uk/.in_use/97163 newnext-steps-uk/.in_use/97163
+deleted file mode 100644
+index 28ecc03..0000000
+--- oldnext-steps-uk/.in_use/97163
++++ /dev/null
+@@ -1 +0,0 @@
+-{"pid":97163,"procStart":"Tue Oct  6 21:28:31 2026"}
+\ No newline at end of file
+diff --git oldnext-steps-uk/.orphaned_at newnext-steps-uk/.orphaned_at
+deleted file mode 100644
+index cecc6ad..0000000
+--- oldnext-steps-uk/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791324098021
+\ No newline at end of file
+diff --git oldnext-steps-uk/NOTICE.md new/next-steps-uk/NOTICE.md
+index 7b1a3d5..1d106c0 100644
+--- oldnext-steps-uk/NOTICE.md
++++ new/next-steps-uk/NOTICE.md
+@@ -4,3 +4,4 @@ Changes in `hooks/register.tsx`:
+ 2. (1.0.0-uk.2) VS Code: the engine raises `AbovePrompt` on the terminal and desktop only, so on `vscode` the suggestions are drawn under the last reply block (`ui.render` on `AssistantMessage`); a press fills the composer, or copies the prompt to the clipboard where the surface refuses the fill.
+ 3. (1.0.0-uk.3) The block under which the offer goes is found by the last 24 letters and digits of the answer, not an exact text match (the drawn markdown can differ from the raw answer). `tests/vscode.test.tsx` covers the vscode path and checks the terminal draws no buttons under replies.
+ Install this INSTEAD of `next-steps@claude-community`, not alongside it (two copies would draw two suggestion bands).
++4. (1.0.0-uk.5) The VS Code branch (`AssistantMessage`, uk.2 and uk.3) is removed: it never showed anything there live, and the fork it caused after every long answer cost usage for nothing. On `vscode` no fork is asked now. `tests/vscode.test.tsx` became `tests/surface.test.tsx`.
+diff --git oldnext-steps-uk/hooks/register.tsx new/next-steps-uk/hooks/register.tsx
+index 43d4401..a3ee17c 100644
+--- oldnext-steps-uk/hooks/register.tsx
++++ new/next-steps-uk/hooks/register.tsx
+@@ -146,8 +146,7 @@ function parseSuggestions(reply: string, known: ReadonlySet<string> | null): Sug
+ let view: View = { kind: 'hidden' }
+ // The last answer's text: VS Code draws no AbovePrompt band, so there the
+ // suggestions go under the reply block this text ends with (uk fork, 02.10.2026).
+-let lastAnswer = ''
+-const letters = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '')
++let isVscode = false
+ 
+ function show($: EngineInterface, nextView: View): void {
+   view = nextView
+@@ -158,6 +157,13 @@ export const register: Register = (on, options) => {
+   const minTurnChars = typeof options?.minAnswerChars === 'number' ? options.minAnswerChars : 80
+   const suggestsSkills = options?.suggestSkills !== false
+ 
++  // VS Code raises AbovePrompt nowhere, so nothing could be drawn there: do not spend a fork on it
++  on('session.start', async ($, e, next) => {
++    isVscode = String(e.surface ?? '') === 'vscode'
++
++    return next(e)
++  })
++
+   // A new turn (typed or otherwise) hides whatever was offered.
+   on('turn.start', async ($, e, next) => {
+     if (view.kind !== 'hidden') show($, { kind: 'hidden' })
+@@ -167,8 +173,7 @@ export const register: Register = (on, options) => {
+   // Turn over: ask the fork, detached, so the turn's completion never waits on it.
+   on('turn.complete', async ($, e, next) => {
+     const result = await next(e)
+-    if (e.reason !== 'answer' || e.answer.trim().length < minTurnChars) return result
+-    lastAnswer = e.answer.trimEnd()
++    if (isVscode || e.reason !== 'answer' || e.answer.trim().length < minTurnChars) return result
+     const turnId = e.turnId
+     show($, { kind: 'loading', turnId })
+     void (async () => {
+@@ -234,49 +239,4 @@ export const register: Register = (on, options) => {
+       </Box>
+     )
+   })
+-
+-  // VS Code raises AbovePrompt nowhere ("terminal and desktop surfaces only"),
+-  // so there the offer is drawn under the last reply block instead. A press
+-  // fills the composer where the surface lets a plugin; where it does not
+-  // (no_composer), the prompt goes to the clipboard to paste.
+-  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next): Promise<RenderElement> => {
+-    const below = await next(e)
+-    if (e.surface !== 'vscode' || view.kind === 'hidden') return below
+-    // The block's text is markdown as the surface draws it, which can differ from the raw answer (links,
+-    // escapes): compare the last letters and digits only.
+-    const tail = letters(e.props.text).slice(-24)
+-    if (tail.length < 8 || letters(lastAnswer).slice(-24) !== tail) return below
+-    const { Box, Text, Button } = $.ui.resolve(e)
+-    if (view.kind === 'loading') {
+-      return (
+-        <Box flexDirection="column">
+-          {below}
+-          <Text dimColor>next steps…</Text>
+-        </Box>
+-      )
+-    }
+-    const surface = e.surface
+-    const take = async (prompt: string) => {
+-      show($, { kind: 'hidden' })
+-      const r = await $.prompt.fill({ text: prompt }).catch(() => ({ isFilled: false }))
+-      if (r.isFilled) return
+-      const c = await $.ui.copy({ text: prompt, surface }).catch(() => ({ isCopied: false }))
+-      $.ui.toast(c.isCopied ? 'скопійовано, встав у поле вводу' : 'не вдалося вставити підказку')
+-    }
+-    return (
+-      <Box flexDirection="column">
+-        {below}
+-        <Box marginTop={1} />
+-        <Text dimColor>next:</Text>
+-        {view.items.map((item, index) => (
+-          <Box key={`v${index}`} marginLeft={2}>
+-            <Button plain label={`${index + 1}: ${item.label}`} onPress={() => void take(item.prompt)} />
+-          </Box>
+-        ))}
+-        <Box marginLeft={2}>
+-          <Button plain label="0: dismiss" onPress={() => show($, { kind: 'hidden' })} />
+-        </Box>
+-      </Box>
+-    )
+-  })
+ }
+diff --git old/next-steps-uk/tests/surface.test.tsx new/next-steps-uk/tests/surface.test.tsx
+new file mode 100644
+index 0000000..f14d54b
+--- /dev/null
++++ new/next-steps-uk/tests/surface.test.tsx
+@@ -0,0 +1,37 @@
++/* @jsxRuntime classic */
++/* @jsx h */
++import { test, expect } from 'claude-code/testing'
++
++// VS Code draws no band above the prompt, so a fork there would be spent for nothing (the vscode branch was removed in uk.5).
++const ANSWER = 'Cloudflare Workers сам викликає обробник scheduled() за cron-виразом із wrangler.toml. '.repeat(3).trimEnd()
++
++const stubs = (on: any, forks: string[]) => {
++  on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }) as never)
++  on('turn.complete', async () => ({ text: '' }) as never)
++  on('command.list', async () => ({ value: [] }) as never)
++  on('ui.log', async () => ({}) as never)
++  on('prompt.suggest', async () => ({ isShown: false }) as never)
++  on('ui.render', async (t: any, e: any) => { const { Text } = t.ui.resolve(e); return <Text>reply</Text> })
++  on('model.fork', async () => (forks.push('fork'), { value: { isAnswered: true, text: '[{"label":"Запусти тести","prompt":"запусти npm test"}]', usage: {} } }) as never)
++}
++
++test('vscode: no fork is spent, nothing could be drawn there', async ($, on) => {
++  const forks: string[] = []
++  stubs(on, forks)
++  await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' } as never)
++  await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 1, isAborted: false, reason: 'answer' } as never)
++  await new Promise(r => setTimeout(r, 0))
++  expect(forks).toHaveLength(0)
++})
++
++test('desktop: a long answer asks the fork and the band offers the suggestion', async ($, on) => {
++  const forks: string[] = []
++  stubs(on, forks)
++  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' } as never)
++  await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 1, isAborted: false, reason: 'answer' } as never)
++  await new Promise(r => setTimeout(r, 0))
++  expect(forks).toHaveLength(1)
++  const ui = await $.ui.mount({ plugin: 'next-steps-uk', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { bodyRows: 10 }, view: {} } } as never)
++  expect(await ui.find({ type: 'Button', text: /Запусти тести/ } as never)).toBeDefined()
++  await ui.unmount()
++})
+diff --git oldnext-steps-uk/tests/vscode.test.tsx newnext-steps-uk/tests/vscode.test.tsx
+deleted file mode 100644
+index 465c485..0000000
+--- oldnext-steps-uk/tests/vscode.test.tsx
++++ /dev/null
+@@ -1,42 +0,0 @@
+-/* @jsxRuntime classic */
+-/* @jsx h */
+-import { test, expect } from 'claude-code/testing'
+-
+-// VS Code draws no AbovePrompt band: the offer must appear under the last reply block (uk fork, 02.10.2026).
+-const ANSWER = 'Cloudflare Workers сам викликає обробник scheduled() за cron-виразом із wrangler.toml. '.repeat(3).trimEnd()
+-
+-test('vscode: suggestions under the last reply block', async ($, on) => {
+-  on('turn.complete', async () => ({ text: '' }) as never)
+-  on('command.list', async () => ({ value: [] }) as never)
+-  on('ui.log', async () => ({}) as never)
+-  on('prompt.suggest', async () => ({ isShown: false }) as never)
+-  on('ui.render', async (t, e) => { const { Text } = t.ui.resolve(e); return <Text>reply</Text> })
+-  on('model.fork', async () => ({ value: { isAnswered: true, text: '[{"label":"Запусти тести","prompt":"запусти npm test"}]', usage: {} } }) as never)
+-  await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 1, isAborted: false, reason: 'answer' } as never)
+-  await new Promise(r => setTimeout(r, 0))
+-  const ui = await $.ui.mount({ plugin: 'next-steps-uk', surface: 'vscode', component: 'AssistantMessage', props: { text: ANSWER, isFirstOfReply: true } } as never)
+-  expect(await ui.find({ type: 'Button', text: /Запусти тести/ } as never)).toBeDefined()
+-  await ui.unmount()
+-})
+-
+-test('vscode: block drawn with a link the raw answer spells differently', async ($, on) => {
+-  on('turn.complete', async () => ({ text: '' }) as never)
+-  on('command.list', async () => ({ value: [] }) as never)
+-  on('ui.log', async () => ({}) as never)
+-  on('prompt.suggest', async () => ({ isShown: false }) as never)
+-  on('ui.render', async (t, e) => { const { Text } = t.ui.resolve(e); return <Text>reply</Text> })
+-  on('model.fork', async () => ({ value: { isAnswered: true, text: '[{"label":"Запусти тести","prompt":"запусти npm test"}]', usage: {} } }) as never)
+-  const raw = 'Обробник у [src/index.js:130](src/index.js:130), а розклад рахується за київським днем і хвилиною.'
+-  await $.turn.complete({ turnId: 't2', answer: raw, durationMs: 1, isAborted: false, reason: 'answer' } as never)
+-  await new Promise(r => setTimeout(r, 0))
+-  const ui = await $.ui.mount({ plugin: 'next-steps-uk', surface: 'vscode', component: 'AssistantMessage', props: { text: 'Обробник у src/index.js:130, а розклад рахується за київським днем і хвилиною.', isFirstOfReply: true } } as never)
+-  expect(await ui.find({ type: 'Button', text: /Запусти тести/ } as never)).toBeDefined()
+-  await ui.unmount()
+-})
+-
+-test('terminal: no buttons under the reply (the band above the prompt draws them)', async ($, on) => {
+-  on('ui.render', async (t, e) => { const { Text } = t.ui.resolve(e); return <Text>reply</Text> })
+-  const ui = await $.ui.mount({ plugin: 'next-steps-uk', surface: 'terminal', component: 'AssistantMessage', props: { text: 'будь-що довге тут', isFirstOfReply: true } } as never)
+-  expect(await ui.find({ type: 'Button' } as never)).toBeUndefined()
+-  await ui.unmount()
+-})
+diff --git oldnext-steps-uk/tsconfig.json newnext-steps-uk/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldnext-steps-uk/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}
+diff --git oldnotify/.claude-plugin/plugin.json new/notify/.claude-plugin/plugin.json
+index 1a5224d..6a6a374 100644
+--- oldnotify/.claude-plugin/plugin.json
++++ new/notify/.claude-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "notify",
+-  "version": "0.2.0",
++  "version": "0.2.1",
+   "description": "A quick pop-up (toast, plus a macOS system notification) when a long Bash command or a long turn finishes, so you can stop watching it.",
+   "author": { "name": "noaod" },
+   "userConfig": {
+diff --git oldnotify/.orphaned_at newnotify/.orphaned_at
+deleted file mode 100644
+index 5cb7113..0000000
+--- oldnotify/.orphaned_at
++++ /dev/null
+@@ -1 +0,0 @@
+-1791306818352
+\ No newline at end of file
+diff --git oldnotify/hooks/register.ts new/notify/hooks/register.ts
+index 269a663..1d3cd33 100644
+--- oldnotify/hooks/register.ts
++++ new/notify/hooks/register.ts
+@@ -8,7 +8,8 @@ import { duration, oneLine } from './format'
+  *  - a whole turn that ran at least `longTurnSeconds` (default 120).
+  * Each notice is a toast and, on macOS, also a system notification (`systemNotification`), because a toast
+  * lives inside the window and the point is to be reached when you are looking at something else.
+- * Not covered: a command started with run_in_background returns at once, so its end is not seen here.
++ * Not covered, on purpose: a command started with run_in_background returns at once and its end is NOT announced
++ * (0.2.0 did announce it as `Background task finished: ...`; removed in 0.2.1, the text was an unreadable id and path).
+  * A command that waited for an approval dialog counts that wait as running time.
+  */
+ export const register: Register = (on, options) => {
+@@ -35,24 +36,6 @@ export const register: Register = (on, options) => {
+     return next(e)
+   })
+ 
+-  // A command Claude started in the background (run_in_background) returns at once; its end arrives later as
+-  // a notification prompt of origin `task-notification`. That is the usual way a long build runs here.
+-  on('prompt.submit', async ($, e, next) => {
+-    if (e.origin.kind === 'task-notification') {
+-      const text = `✔ Background task finished: ${oneLine(String(e.text ?? '').replace(/<[^>]+>/g, ' '), 70)}`
+-      const now = await $.clock.now()
+-
+-      lastNoticeAt = now
+-      $.ui.toast(text, { timeoutMs: 8000 })
+-
+-      if (isMac) {
+-        await $.process.run(['osascript', '-e', `display notification "${oneLine(text, 120)}" with title "Claude Code"`]).catch(() => undefined)
+-      }
+-    }
+-
+-    return next(e)
+-  })
+-
+   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+     const started = await $.clock.now()
+     const ran = await next(e)
+diff --git oldnotify/tests/register.test.ts new/notify/tests/register.test.ts
+index e59ef22..66b530a 100644
+--- oldnotify/tests/register.test.ts
++++ new/notify/tests/register.test.ts
+@@ -21,7 +21,7 @@ describe('notify', () => {
+     expect(argvs.some(a => a[0] === 'osascript' && a.join(' ').includes('Command finished in 45s'))).toBe(true)
+   })
+ 
+-  test('the end of a background task (a task-notification prompt) gives a toast and a notification', async ($, on) => {
++  test('the end of a background task (a task-notification prompt) is NOT announced', async ($, on) => {
+     mock.clock(on)
+     const toasts: string[] = []
+     const argvs: string[][] = []
+@@ -31,14 +31,8 @@ describe('notify', () => {
+ 
+     await $.prompt.submit({ text: '<task-notification><summary>npm run build completed</summary></task-notification>', origin: { kind: 'task-notification' } })
+ 
+-    expect(toasts).toHaveLength(1)
+-    expect(toasts[0]).toContain('Background task finished: npm run build completed')
+-    expect(argvs.some(a => a[0] === 'osascript')).toBe(true)
+-
+-    // an ordinary typed prompt is not announced
+-    await $.prompt.submit({ text: 'hello', origin: { kind: 'composer' } })
+-
+-    expect(toasts).toHaveLength(1)
++    expect(toasts).toHaveLength(0)
++    expect(argvs.some(a => a[0] === 'osascript')).toBe(false)
+   })
+ 
+   test('a quick command is silent', async ($, on) => {
+diff --git oldnotify/tsconfig.json newnotify/tsconfig.json
+deleted file mode 100644
+index 8681ec0..0000000
+--- oldnotify/tsconfig.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-{
+-  "extends": "./.claude-plugin/types/tsconfig.json"
+-}

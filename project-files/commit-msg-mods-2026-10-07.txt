@@ -1,0 +1,25 @@
+mods: one-line band, git-aware blast-radius, plan-progress fork, ponytail cleanup
+
+First commit of the qa-mods marketplace (14 plugins).
+
+- blast-radius 0.5.0: a plain rm is judged by git (outside git = LOW, tracked and
+  clean = MEDIUM, label only); a short Ukrainian dialog only for uncommitted
+  changes, the home folder, more than 20 files and hard risks; typed "Other"
+  is handed back to Claude instead of running the command; cd-aware paths.
+- hud 0.5.0: one line "Контекст · 5г · 7д · $ · кеш" plus the buttons handoff,
+  Compact, Clear, Прогрес; "скинуто" for a window that has reset; no start ping.
+- handoff 0.6.0: mini Clippy with moods and random Ukrainian remarks; the
+  context line and the button moved to hud.
+- quick-actions 0.3.0: only the typed /compact and /clear confirm for VS Code.
+- plan-progress 0.7.6-qa.5: fork of zycck/claude-mods (MIT): wider title, full
+  title on hover, Ukrainian interface, no PowerShell sound fallback, no footer
+  button.
+- sandbox-guard 0.1.5: judges the write target, not any mention of a path.
+- retry-analyzer 0.1.1: the free-text description is not part of a call signature.
+- evidence-saver 0.3.0, next-steps-uk uk.5, notify 0.2.1: removed unused options
+  and the unconfirmed VS Code branch.
+- INSTALL.md: from-scratch install, inventory, decisions log; install-pack.sh
+  gets --all and replaces plan-progress@zycck-mods with the fork.
+- evidence/: screenshots of the live checks (06-07.10.2026).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
