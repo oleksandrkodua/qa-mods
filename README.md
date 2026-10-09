@@ -47,7 +47,6 @@ A bare `node --test` also picks up `register.test.ts`, which only runs under `cl
 
 - [HANDOFF.md](HANDOFF.md): current state, open checks, what not to revert.
 - [CONTEXT.md](CONTEXT.md): background and decisions.
-- `evidence/`: screenshots proving each mod works.
 
 ## License
 
