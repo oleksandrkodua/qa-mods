@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 
 import type { Limit } from '../types'
 
-import { bandLabel, cacheLeft, isReset, limitLabel, report, tone, untilReset } from './format'
+import { bandLabel, cacheChip, cacheLeft, isReset, limitLabel, report, tone, untilReset } from './format'
 
 const limits = atom({ plugin: 'hud', key: 'limits' } as const, [])
 const usd = atom({ plugin: 'hud', key: 'usd' } as const, null)
@@ -33,8 +33,8 @@ export const HANDOFF_PROMPT = `Підготуй передачу контекс�
 const COLOR = { ok: '#30A46C', warn: '#E09A1E', hot: '#FF1F1F' } as const
 
 /**
- * HUD: one line above the prompt: context fill and rate-limit windows (cost and the prompt-cache countdown are
- * left out so the five buttons fit a narrow window; `/hud` still reports them), then the buttons (handoff,
+ * HUD: one line above the prompt: context fill, rate-limit windows and a short `кеш 42хв` chip while the prompt-cache
+ * countdown runs (cost is left out so the five buttons fit a narrow window; `/hud` still reports it), then the buttons (handoff,
  * Compact, Clear, Progress), and /hud with the figures as text
  * (VS Code does not draw the band). The Handoff button fills the prompt box itself (no command runs); the Progress
  * button runs a command another mod registers (`progress`); a missing mod just makes it do nothing. Compact and Clear ask first (confirm /
@@ -194,6 +194,7 @@ export const register: Register = (on, options) => {
       </Text>
     )
 
+    const chip = cacheChip(await read($, lastReplyAt), ttl, now)
     const parts = [
       fill >= ctxWarn ? (
         <Text key="ctx" color={fill >= ctxRed ? COLOR.hot : COLOR.warn}>{`Контекст ${fill}%`}</Text>
@@ -220,6 +221,7 @@ export const register: Register = (on, options) => {
               <Button key="b-times" label={times ? '%' : '⏱'} onPress={() => void update($, showTimes, v => !v)} />
             </Box>,
           ]),
+      ...(chip ? [<Text key="cache" dimColor>{chip}</Text>] : []),
     ]
 
     return (

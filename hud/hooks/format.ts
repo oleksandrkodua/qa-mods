@@ -59,6 +59,13 @@ export function cacheLeft(lastReplyAt: number, ttlMinutes: number, now: number):
   return Math.max(0, lastReplyAt + ttlMinutes * 60000 - now)
 }
 
+/** The band's cache chip: "кеш 42хв" while the countdown runs; empty before the first reply and once it has expired. */
+export function cacheChip(lastReplyAt: number, ttlMinutes: number, now: number): string {
+  const left = cacheLeft(lastReplyAt, ttlMinutes, now)
+
+  return left ? `кеш ${Math.ceil(left / 60000)}хв` : ''
+}
+
 /** The same figures as plain text, for /hud (the only place VS Code can show them). */
 export function report(args: { limits: Limit[]; usd: number | null; lastReplyAt: number; ttlMinutes: number; now: number; warnAt: number; redAt?: number; stale?: boolean }): string {
   const { limits, usd, lastReplyAt, ttlMinutes, now, warnAt, redAt = 85, stale } = args

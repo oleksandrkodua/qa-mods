@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { cacheLeft, countdown, isReset, report, tone, untilReset } from '../hooks/format.ts'
+import { cacheChip, cacheLeft, countdown, isReset, report, tone, untilReset } from '../hooks/format.ts'
 
 test('countdown', () => {
   assert.equal(countdown(59 * 60000 + 49000), '59:49')
@@ -75,4 +75,11 @@ test('report: a window whose reset time passed says "скинуто", not the ol
 
   assert.match(text, /скинуто \(було 91%/)
   assert.doesNotMatch(text, /‼|⚠/)
+})
+
+test('cacheChip: minutes left while counting, empty before the first reply and after expiry', () => {
+  assert.equal(cacheChip(0, 60, 1000), '')
+  assert.equal(cacheChip(1000, 60, 1000 + 18 * 60000), 'кеш 42хв')
+  assert.equal(cacheChip(1000, 60, 1000 + 59 * 60000 + 30000), 'кеш 1хв')
+  assert.equal(cacheChip(1000, 5, 1000 + 6 * 60000), '')
 })
