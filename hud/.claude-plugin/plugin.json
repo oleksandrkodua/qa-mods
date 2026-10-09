@@ -4,7 +4,7 @@
   "author": {
     "name": "noaod"
   },
-  "description": "One line above the prompt: context fill, rate-limit windows, session cost, prompt-cache countdown, and the buttons handoff, Compact, Clear and Progress; /hud with the same figures as text.",
+  "description": "One line above the prompt: context fill, rate-limit windows, a short cache chip (кеш 42хв) while the prompt cache is warm, and the buttons Handoff, Compact, Clear, Progress and a time/percent toggle; /hud with the figures as text, including cost and the full countdown.",
   "types": "./types/index.d.ts",
   "userConfig": {
     "cacheTtlMinutes": {
