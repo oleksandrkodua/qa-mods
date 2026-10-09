@@ -7,11 +7,11 @@ Fourteen Claude Code mods, packaged as one plugin marketplace (`qa-mods`). Made 
 Run in your own Terminal (a sandboxed Claude session cannot write `~/.claude`).
 
 ```bash
-claude plugin marketplace add oleksandrkodua/alex-claude-mods
+claude plugin marketplace add oleksandrkodua/qa-mods
 claude plugin install hud@qa-mods
 ```
 
-Replace `hud` with any plugin from the table. The repository is private, so `git` must be signed in to GitHub (`gh auth login`).
+Replace `hud` with any plugin from the table.
 
 To install everything from a local clone, or to set up a fresh machine, see [INSTALL.md](INSTALL.md) and `install-pack.sh`.
 
