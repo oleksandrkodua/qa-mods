@@ -77,9 +77,14 @@ test('report: a window whose reset time passed says "скинуто", not the ol
   assert.doesNotMatch(text, /‼|⚠/)
 })
 
-test('cacheChip: minutes left while counting, empty before the first reply and after expiry', () => {
+test('cacheChip: minutes:seconds counting down, empty before the first reply and after expiry', () => {
   assert.equal(cacheChip(0, 60, 1000), '')
-  assert.equal(cacheChip(1000, 60, 1000 + 18 * 60000), 'кеш 42хв')
-  assert.equal(cacheChip(1000, 60, 1000 + 59 * 60000 + 30000), 'кеш 1хв')
+  assert.equal(cacheChip(1000, 60, 1000), 'кеш 60:00')
+  assert.equal(cacheChip(1000, 60, 1000 + 12000), 'кеш 59:48')
+  assert.equal(cacheChip(1000, 60, 1000 + 59000), 'кеш 59:01')
+  assert.equal(cacheChip(1000, 60, 1000 + 60000), 'кеш 59:00')
+  assert.equal(cacheChip(1000, 60, 1000 + 18 * 60000), 'кеш 42:00')
+  assert.equal(cacheChip(1000, 60, 1000 + 59 * 60000 + 30000), 'кеш 0:30')
+  assert.equal(cacheChip(1000, 60, 1000 + 59 * 60000 + 59500), '')
   assert.equal(cacheChip(1000, 5, 1000 + 6 * 60000), '')
 })

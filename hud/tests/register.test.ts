@@ -61,7 +61,7 @@ describe('hud', () => {
     expect(text).toContain('≈ 1:00:00')
   })
 
-  test('the band shows the limits and the short cache chip but not cost or the full countdown', async ($, on) => {
+  test('the band shows the limits and the cache chip (m:ss) but not cost or the h:mm:ss countdown', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
     stub(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -74,7 +74,7 @@ describe('hud', () => {
       expect(await ui.find({ type: 'Text', text: /83%/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /\$0\.10/ })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: /1:00:00/ })).toBeUndefined()
-      expect(await ui.find({ type: 'Text', text: /^кеш \d+хв$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^кеш 60:00$/ })).toBeDefined()
       await ui.unmount()
     }
   })

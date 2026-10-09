@@ -33,7 +33,7 @@ export const HANDOFF_PROMPT = `Підготуй передачу контекс�
 const COLOR = { ok: '#30A46C', warn: '#E09A1E', hot: '#FF1F1F' } as const
 
 /**
- * HUD: one line above the prompt: context fill, rate-limit windows and a short `кеш 42хв` chip while the prompt-cache
+ * HUD: one line above the prompt: context fill, rate-limit windows and a `кеш 59:48` chip (m:ss, ticking every second) while the prompt-cache
  * countdown runs (cost is left out so the five buttons fit a narrow window; `/hud` still reports it), then the buttons (handoff,
  * Compact, Clear, Progress), and /hud with the figures as text
  * (VS Code does not draw the band). The Handoff button fills the prompt box itself (no command runs); the Progress

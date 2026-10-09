@@ -62,7 +62,7 @@
     {
       "name": "hud",
       "source": "./hud",
-      "description": "Context fill and rate-limit windows above the prompt, a short cache chip (кеш 42хв) while the prompt cache is warm, five buttons (handoff, Compact, Clear, Progress, time/percent toggle), and /hud with the figures as text (cost and the full countdown are only in /hud)."
+      "description": "Context fill and rate-limit windows above the prompt, a cache chip (кеш 59:48, m:ss) while the prompt cache is warm, five buttons (handoff, Compact, Clear, Progress, time/percent toggle), and /hud with the figures as text (cost and the full countdown are only in /hud)."
     },
     {
       "name": "next-steps-uk",

@@ -30,7 +30,7 @@ To install everything from a local clone, or to set up a fresh machine, see [INS
 | `handoff` | Offers `/handoff` as the context fills up; fills the prompt box with a HANDOFF.md prompt |
 | `notify` | A toast and a macOS notification when a long command or turn finishes |
 | `quick-actions` | Compact and Clear buttons, each asks to confirm first |
-| `hud` | Context fill and rate-limit windows above the prompt, a short `кеш 42хв` chip while the prompt cache is warm, five buttons, and `/hud` with the figures as text |
+| `hud` | Context fill and rate-limit windows above the prompt, a `кеш 59:48` chip (m:ss) while the prompt cache is warm, five buttons, and `/hud` with the figures as text |
 | `next-steps-uk` | Fork of next-steps (MIT, Thariq Shihipar): suggested next prompts are always in Ukrainian. Install instead of `next-steps` |
 | `plan-progress` | Fork of plan-progress 0.7.6 (zycck, MIT): live progress bars above the prompt. Install instead of `plan-progress@zycck-mods` |
 
