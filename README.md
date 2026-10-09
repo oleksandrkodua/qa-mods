@@ -43,11 +43,6 @@ cd hud && node --test tests/format.test.mjs tests/handoff-prompt.test.mjs
 
 A bare `node --test` also picks up `register.test.ts`, which only runs under `claude plugin test`.
 
-## Project notes
-
-- [HANDOFF.md](HANDOFF.md): current state, open checks, what not to revert.
-- [CONTEXT.md](CONTEXT.md): background and decisions.
-
 ## License
 
 No license file for the original mods yet. The two forks keep their upstream MIT notices: `next-steps-uk/NOTICE.md` and `plan-progress/NOTICE.md` (plus `plan-progress/LICENSE.upstream`).
