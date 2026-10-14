@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 
 import type { Limit } from '../types'
 
-import { bandLabel, cacheChip, cacheLeft, isReset, limitLabel, report, tone, untilReset } from './format'
+import { bandLabel, bandPlaceholders, cacheChip, cacheLeft, isReset, limitLabel, report, tone, untilReset } from './format'
 
 const limits = atom({ plugin: 'hud', key: 'limits' } as const, [])
 const usd = atom({ plugin: 'hud', key: 'usd' } as const, null)
@@ -202,7 +202,11 @@ export const register: Register = (on, options) => {
         <Text key="ctx" dimColor>{`Контекст ${fill}%`}</Text>
       ),
       ...(list.length === 0
-        ? []
+        ? [
+            <Box key="limits" flexDirection="row" alignItems="center" gap={1}>
+              {bandPlaceholders().flatMap((t, i) => [...(i > 0 ? [dot(`p${i}`)] : []), <Text key={`ph-${i}`} dimColor>{t}</Text>])}
+            </Box>,
+          ]
         : [
             <Box key="limits" flexDirection="row" alignItems="center" gap={1}>
               {list.flatMap((l, i) => [

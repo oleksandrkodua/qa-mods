@@ -216,7 +216,7 @@ describe('hud', () => {
     await ui.unmount()
   })
 
-  test('before the first measurement the band shows the context and the buttons, no cost or cache', async ($, on) => {
+  test('before the first measurement the band shows the context, the 5г — / 7д — placeholders and the buttons, no cost or cache', async ($, on) => {
     mock.clock(on)
     stub(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -224,6 +224,8 @@ describe('hud', () => {
     const ui = await $.ui.mount({ plugin: 'hud', surface: 'terminal', ...BAND })
 
     expect(await ui.find({ type: 'Text', text: /Контекст 0%/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /5г —/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /7д —/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /\$0\.00/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /кеш/ })).toBeUndefined()
     await ui.unmount()

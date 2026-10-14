@@ -8,6 +8,9 @@ export const limitLabel = (kind: string) => LABEL[kind] ?? kind
 /** The band's one-line labels: 5г, 7д. */
 export const bandLabel = (kind: string) => ({ five_hour: '5г', seven_day: '7д' })[kind] ?? limitLabel(kind)
 
+/** The band's placeholders while no limits have arrived yet (no reply in the session): "5г —", "7д —". */
+export const bandPlaceholders = (): string[] => ['five_hour', 'seven_day'].map(k => `${bandLabel(k)} —`)
+
 /** `m:ss` for under an hour, `h:mm:ss` from an hour up; never negative. */
 export function countdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))

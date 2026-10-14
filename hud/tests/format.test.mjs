@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { cacheChip, cacheLeft, countdown, isReset, report, tone, untilReset } from '../hooks/format.ts'
+import { bandPlaceholders, cacheChip, cacheLeft, countdown, isReset, report, tone, untilReset } from '../hooks/format.ts'
 
 test('countdown', () => {
   assert.equal(countdown(59 * 60000 + 49000), '59:49')
@@ -87,4 +87,8 @@ test('cacheChip: minutes:seconds counting down, empty before the first reply and
   assert.equal(cacheChip(1000, 60, 1000 + 59 * 60000 + 30000), 'кеш 0:30')
   assert.equal(cacheChip(1000, 60, 1000 + 59 * 60000 + 59500), '')
   assert.equal(cacheChip(1000, 5, 1000 + 6 * 60000), '')
+})
+
+test('bandPlaceholders: shown until the first limits arrive', () => {
+  assert.deepEqual(bandPlaceholders(), ['5г —', '7д —'])
 })
