@@ -1,6 +1,6 @@
 import type { Register } from 'claude-code'
 
-import { classify, repoDir } from './gate'
+import { classify, pushSummary, remoteDbSummary, repoDir } from './gate'
 
 /**
  * Remote Gate: asks before `git push` and `wrangler ... --remote`, showing the remote, the branch
@@ -27,6 +27,7 @@ export const register: Register = on => {
 
     try {
       let info = ''
+      let what = remoteDbSummary(command)
 
       if (kind !== 'remote-db') {
         const dir = repoDir(command, home)
@@ -36,13 +37,20 @@ export const register: Register = on => {
         const out = await $.process.run(['git', ...where, 'log', '--oneline', '@{u}..HEAD'])
         const urls = remote.stdout.split('\n').filter(l => l.includes('(push)')).join('; ')
         const commits = out.exitCode === 0 ? out.stdout.trim() || 'немає нових комітів' : 'upstream не задано'
+        const remotes = remote.stdout.split('\n').flatMap(l => {
+          const m = /^(\S+)\s+(\S+)\s+\(push\)/.exec(l)
+
+          return m ? [{ name: m[1]!, url: m[2]! }] : []
+        })
+
+        what = pushSummary(command, { branch: branch.stdout.trim(), remotes, commits: out.exitCode === 0 ? out.stdout.split('\n').filter(Boolean) : null })
 
         // the dialog collapses line breaks, so the parts are labelled sentences
         info = ` Тека: ${dir ?? 'тека сесії'}. Гілка: ${branch.stdout.trim() || '?'}. Remote: ${urls || '?'}. Піде: ${commits.split('\n').slice(0, 12).join(' | ')}.`
       }
 
       const label = kind === 'force-push' ? 'FORCE-PUSH' : kind === 'push' ? 'git push' : 'wrangler --remote (бойові дані)'
-      const answer = await $.ui.ask(`Remote Gate: ${label}. Команда: ${command.slice(0, 200)}.${info} Виконати?`, {
+      const answer = await $.ui.ask(`Remote Gate: ${label}. Що зробить: ${what} Команда: ${command.slice(0, 200)}.${info} Виконати?`, {
         options: ['Виконати', 'Скасувати'],
         header: 'Remote Gate',
       })
