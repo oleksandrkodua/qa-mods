@@ -2,11 +2,11 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { HANDOFF_PROMPT } from '../hooks/register'
 
-const stub = (on: any) => {
+const stub = (on: any, toasts?: string[]) => {
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
   on('session.measure', ($: any, e: any) => ({ changed: e.changed }))
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', ($: any, e: any) => (toasts?.push(String(e.text ?? e.message)), { value: undefined }))
   // the engine's own drawing beneath the plugin: an empty box
   on('ui.render', ($: any, e: any) => $.ui.resolve(e).Box({}))
 }
@@ -201,7 +201,8 @@ describe('hud', () => {
 
   test('Handoff copies the text where the box cannot be filled', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
-    stub(on)
+    const toasts: string[] = []
+    stub(on, toasts)
     const copied: string[] = []
     on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
     on('prompt.fill', () => ({ isFilled: false }))
@@ -213,6 +214,24 @@ describe('hud', () => {
 
     await ui.press({ key: 'b-handoff' })
     expect(copied).toEqual([HANDOFF_PROMPT])
+    expect(toasts.at(-1)).toBe('Поле вводу зараз не заповнити: промпт скопійовано, встав його сам.')
+    await ui.unmount()
+  })
+
+  test('Handoff says so when the text could not be copied either', async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
+    const toasts: string[] = []
+    stub(on, toasts)
+    on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+    on('prompt.fill', () => ({ isFilled: false }))
+    on('ui.copy', () => ({ value: { isCopied: false, reason: 'no-clipboard' } }))
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.session.measure(MEASURE)
+
+    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
+
+    await ui.press({ key: 'b-handoff' })
+    expect(toasts.at(-1)).toBe('Поле вводу зараз не заповнити.')
     await ui.unmount()
   })
 
