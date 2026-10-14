@@ -17,6 +17,8 @@ export interface Analysis {
   gitDirs: string[]
   /** the arguments of each `find` that deletes or runs a risky command, so the dialog can say in words what it will do */
   finds: string[][]
+  /** sudo, dd, git reset --hard, chmod/chown -R: the words of each command (sudo stripped), so the dialog can say in words what it will do */
+  ops: { sudo: boolean; words: string[] }[]
 }
 
 /** Split a command line into words, honouring single and double quotes. */
@@ -112,7 +114,7 @@ const FIND_READ_ONLY = new Set(['stat', 'ls', 'cat', 'wc', 'file', 'grep'])
 
 export function analyze(raw: string): Analysis {
   const cmd = stripHeredocs(raw)
-  const a: Analysis = { risk: 'none', reasons: [], paths: [], git: false, segment: '', hard: false, deletes: [], gitDirs: [], finds: [] }
+  const a: Analysis = { risk: 'none', reasons: [], paths: [], git: false, segment: '', hard: false, deletes: [], gitDirs: [], finds: [], ops: [] }
   // `cd dir && rm x`: relative paths belong to the directory the last cd moved to
   let cwd = ''
   const at = (p: string) => (cwd && !/^([/~]|\$)/.test(p) ? `${cwd.replace(/\/$/, '')}/${p}` : p)
@@ -129,8 +131,15 @@ export function analyze(raw: string): Analysis {
 
     let bin = w[0]
     let args = w.slice(1)
+    let sudo = false
+    let noted = false
+    const note = () => {
+      noted = true
+      a.ops.push({ sudo, words: [bin!, ...args] })
+    }
 
     if (bin === 'sudo') {
+      sudo = true
       bump(a, 'high', 'runs with sudo', seg)
       bin = args[0]
       args = args.slice(1)
@@ -176,6 +185,7 @@ export function analyze(raw: string): Analysis {
         const rec = hasFlag(args, 'R', '--recursive')
 
         bump(a, rec ? 'high' : 'medium', `${bin} changes permissions/ownership${rec ? ' recursively' : ''}`, seg)
+        if (rec) note()
         push(...operands(args).slice(1))
         break
       }
@@ -184,6 +194,7 @@ export function analyze(raw: string): Analysis {
       case 'diskutil':
       case 'truncate': {
         bump(a, 'high', `${bin} can destroy data at block/file level`, seg)
+        if (bin === 'dd') note()
         break
       }
       case 'find': {
@@ -244,6 +255,7 @@ export function analyze(raw: string): Analysis {
 
         if (sub === 'reset' && rest.includes('--hard')) {
           bump(a, 'high', 'git reset --hard discards uncommitted changes', seg)
+          note()
           { a.git = true; a.gitDirs.push(gdir) }
         } else if (sub === 'clean' && (hasFlag(rest, 'f', '--force') || rest.includes('-fd'))) {
           bump(a, 'high', 'git clean deletes untracked files', seg)
@@ -264,6 +276,8 @@ export function analyze(raw: string): Analysis {
         break
       }
     }
+
+    if (sudo && !noted) note()
   }
 
   // truncating redirect to a file: `> file` (but not >&2, >>, 2>/dev/null)

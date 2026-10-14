@@ -97,3 +97,15 @@ test('the dialog puts "Що зробить" between the risk and the command; no
   assert.ok(!hardQuestion(['runs with sudo'], 'sudo ls').includes('Що зробить'))
   assert.deepEqual(analyze("find . -type f -exec stat {} +").finds, [])
 })
+
+test('"Що зробить" for sudo, dd, git reset --hard and chmod -R', () => {
+  const q = c => { const a = analyze(c); return hardQuestion(a.reasons, a.segment, a.finds, a.ops) }
+
+  assert.match(q('sudo ls /etc'), /Що зробить: Запустить «ls \/etc»\. Працює з правами адміністратора \(root\)[^.]*\. Команда: sudo ls/)
+  assert.match(q('dd if=a.img of=/dev/disk2 bs=1m'), /Що зробить: Копіює дані з a\.img у \/dev\/disk2 .*перезапише/)
+  assert.match(q('git reset --hard HEAD~2'), /Що зробить: Скине всі файли робочої копії до стану HEAD~2/)
+  assert.match(q('git reset --hard'), /до стану останнього коміту \(HEAD\)/)
+  assert.match(q('chmod -R 777 ./a ./b'), /Що зробить: Змінить права доступу на «777» для \.\/a, \.\/b і для всього, що лежить всередині\. Команда/)
+  assert.ok(!q('chmod 644 f').includes('Що зробить'))
+  assert.equal(analyze('sudo rm -rf x').ops.length, 1)
+})

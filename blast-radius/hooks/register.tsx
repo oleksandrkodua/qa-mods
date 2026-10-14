@@ -83,7 +83,7 @@ export const register: Register = on => {
         const segment = a.segment || String(e.command ?? '')
         let level: Level = a.risk === 'high' ? 'dialog' : 'medium'
         let title = a.reasons.map(reasonUk).join('; ')
-        let question = hardQuestion(a.reasons, segment, a.finds)
+        let question = hardQuestion(a.reasons, segment, a.finds, a.ops)
 
         if (a.risk === 'high' && !a.hard && a.deletes.length > 0) {
           const facts: Facts = { count: 0, tracked: 0, dirty: 0, untracked: 0, isHome: false }

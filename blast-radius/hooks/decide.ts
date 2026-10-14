@@ -134,8 +134,36 @@ export function findSummary(args: string[]): string {
   return `Шукає ${what}${filter} ${where}, ${how}, і ${[...new Set(acts)].join(' і ')}`
 }
 
-export function hardQuestion(reasons: string[], segment: string, finds: string[][] = []): string {
-  const what = finds.map(findSummary).join('; ')
+/** What dd / git reset --hard / chmod -R / sudo will do, in plain words (sudo adds that it runs as root). */
+export function opSummary(op: { sudo: boolean; words: string[] }): string {
+  const [bin = '', ...args] = op.words
+  const sub = args.find(w => !w.startsWith('-'))
+  const operands = args.filter(w => !w.startsWith('-'))
+  const root = op.sudo ? ' Працює з правами адміністратора (root), обмежень доступу немає.' : ''
+  let text: string
+
+  if (bin === 'dd') {
+    const val = (k: string) => args.find(w => w.startsWith(`${k}=`))?.slice(k.length + 1)
+
+    text = `Копіює дані з ${val('if') ?? 'stdin'} у ${val('of') ?? 'stdout'} блок за блоком${val('of') ? ' і перезапише все, що там було (файл або диск), без запиту' : ''}`
+  } else if (bin === 'git' && args.includes('reset')) {
+    const ref = args.slice(args.indexOf('reset') + 1).find(w => !w.startsWith('-'))
+
+    text = `Скине всі файли робочої копії до стану ${ref ?? 'останнього коміту (HEAD)'}: усі незакомічені зміни пропадуть, повернути їх не вийде`
+  } else if (bin === 'chmod' || bin === 'chown' || bin === 'chgrp') {
+    const what = bin === 'chmod' ? 'права доступу' : bin === 'chown' ? 'власника' : 'групу'
+    const targets = operands.slice(1).join(', ') || '(не вказано)'
+
+    text = `Змінить ${what} на «${operands[0] ?? '?'}» для ${targets} і для всього, що лежить всередині`
+  } else {
+    text = `Запустить «${short([bin, ...args].join(' '), 60)}»`
+  }
+
+  return `${text}.${root}`.replace(/\.\./g, '.')
+}
+
+export function hardQuestion(reasons: string[], segment: string, finds: string[][] = [], ops: { sudo: boolean; words: string[] }[] = []): string {
+  const what = [...finds.map(findSummary), ...ops.map(opSummary)].join('; ').replace(/\.(; |$)/g, '$1')
 
   return `Ризик: ${reasons.map(reasonUk).join('; ')}. ${what ? `Що зробить: ${what}. ` : ''}Команда: ${short(segment, 120)}. Виконати?`
 }
