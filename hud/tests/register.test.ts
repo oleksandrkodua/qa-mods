@@ -205,7 +205,7 @@ describe('hud', () => {
     const copied: string[] = []
     on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
     on('prompt.fill', () => ({ isFilled: false }))
-    on('ui.copy', ($: any, e: any) => (copied.push(e.text), { isCopied: true }))
+    on('ui.copy', ($: any, e: any) => (copied.push(e.text), { value: { isCopied: true } }))
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
     await $.session.measure(MEASURE)
 
