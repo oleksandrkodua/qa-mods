@@ -242,7 +242,7 @@ describe('hud', () => {
 
     const ui = await $.ui.mount({ plugin: 'hud', surface: 'terminal', ...BAND })
 
-    expect(await ui.find({ type: 'Text', text: /Контекст 0%/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Контекст —/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /5г —/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /7д —/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /\$0\.00/ })).toBeUndefined()

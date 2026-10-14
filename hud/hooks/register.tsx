@@ -10,7 +10,7 @@ const usd = atom({ plugin: 'hud', key: 'usd' } as const, null)
 const stale = atom({ plugin: 'hud', key: 'stale' } as const, false)
 const lastReplyAt = atom({ plugin: 'hud', key: 'lastReplyAt' } as const, 0)
 const tick = atom({ plugin: 'hud', key: 'tick' } as const, 0)
-const ctx = atom({ plugin: 'hud', key: 'ctx' } as const, 0)
+const ctx = atom({ plugin: 'hud', key: 'ctx' } as const, -1)
 const showTimes = atom({ plugin: 'hud', key: 'showTimes' } as const, false)
 
 const ASK: Record<string, string> = {
@@ -196,7 +196,9 @@ export const register: Register = (on, options) => {
 
     const chip = cacheChip(await read($, lastReplyAt), ttl, now)
     const parts = [
-      fill >= ctxWarn ? (
+      fill < 0 ? (
+        <Text key="ctx" dimColor>Контекст —</Text>
+      ) : fill >= ctxWarn ? (
         <Text key="ctx" color={fill >= ctxRed ? COLOR.hot : COLOR.warn}>{`Контекст ${fill}%`}</Text>
       ) : (
         <Text key="ctx" dimColor>{`Контекст ${fill}%`}</Text>

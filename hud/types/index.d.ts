@@ -11,7 +11,7 @@ declare module 'claude-code' {
       lastReplyAt: number
       // bumped every second while the cache countdown runs
       tick: number
-      // context fill, percent, from the last measurement
+      // context fill, percent, from the last measurement; -1 before the first
       ctx: number
       // the limit windows show the time to their reset instead of the percent
       showTimes: boolean
