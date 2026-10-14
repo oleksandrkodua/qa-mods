@@ -146,6 +146,20 @@ describe('blast-radius', () => {
     expect(asked[1]).toContain('запуск із sudo')
   })
 
+  test('a risky find asks with a plain-words summary of what it will do, next to the command', async ($, on) => {
+    const asked: string[] = []
+    stubs(on, [], { count: 0, tracked: 0, dirty: 0 }, asked)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '' } }))
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+
+    await bash($, 'find . -maxdepth 1 -name "no-such-file-xyz" -exec rm {} +')
+
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toContain('Ризик: find -exec запустить rm для кожного знайденого файлу.')
+    expect(asked[0]).toContain('Що зробить: Шукає елементи з іменем «no-such-file-xyz» у поточній папці, лише на першому рівні, без вкладених папок, і видалить усе знайдене.')
+    expect(asked[0]).toContain('Команда: find . -maxdepth 1')
+  })
+
   test('the report is appended to the end of that command\'s own output', async ($, on) => {
     stubs(on)
     on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'done\n', stderr: '' } }))
@@ -166,6 +180,17 @@ describe('blast-radius', () => {
     on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'x', stderr: '' } }))
 
     const out: any = await bash($, 'ls -la')
+
+    expect(logs).toEqual([])
+    expect(out.result.stdout).toBe('x')
+  })
+
+  test('find -exec with a read-only command (stat) is harmless: no dialog, no log, output untouched', async ($, on) => {
+    const logs: string[] = []
+    stubs(on, logs)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'x', stderr: '' } }))
+
+    const out: any = await bash($, "find . \\( -name node_modules -o -name .git \\) -prune -o -type f -exec stat -f '%z %N' {} +")
 
     expect(logs).toEqual([])
     expect(out.result.stdout).toBe('x')

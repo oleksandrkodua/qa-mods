@@ -39,6 +39,48 @@ test('curl | sh and truncating redirect', () => {
 
 test('find -delete', () => assert.equal(analyze('find . -name "*.tmp" -delete').risk, 'high'))
 
+test('find -exec with a read-only command is not raised', () => {
+  for (const c of [
+    "find . \\( -name node_modules -o -name .git \\) -prune -o -type f -exec stat -f '%z %N' {} +",
+    'find . -type f -exec ls -l {} \\;',
+    'find src -name "*.ts" -exec cat {} +',
+    'find . -type f -exec wc -l {} +',
+    'find . -type f -exec file {} \\;',
+    'find . -name "*.log" -exec grep -l ERROR {} +',
+    'find . -type f -exec /usr/bin/stat {} +',
+    'find . -type f -execdir wc -c {} \\;',
+    'find . -type f -exec stat {} \\; -exec wc -l {} \\;',
+  ])
+    assert.equal(analyze(c).risk, 'none', c)
+})
+
+test('find -exec with a dangerous or unknown command is high', () => {
+  for (const c of [
+    'find . -name "*.tmp" -exec rm {} \\;',
+    'find . -type f -exec rm -f {} +',
+    'find . -type f -exec mv {} /tmp \\;',
+    'find . -type f -exec sh -c "rm {}" \\;',
+    'find . -type f -exec chmod 000 {} +',
+    'find . -ok rm {} \\;',
+    'find . -type f -execdir rm {} \\;',
+    'find . -type f -exec',
+  ])
+    assert.equal(analyze(c).risk, 'high', c)
+})
+
+test('find: one dangerous -exec among read-only ones, or -delete beside them, is high', () => {
+  assert.equal(analyze('find . -exec stat {} \\; -exec rm {} \\;').risk, 'high')
+  assert.equal(analyze('find . -exec cat {} \\; -delete').risk, 'high')
+  assert.equal(analyze('find . -exec ls {} \\; ; rm a.txt').risk, 'high')
+})
+
+test('find with a dangerous -exec still shows the whole find segment and the path', () => {
+  const a = analyze('find build -type f -exec rm {} \\;')
+  assert.equal(a.risk, 'high')
+  assert.ok(a.segment.startsWith('find build'), a.segment)
+  assert.deepEqual(a.paths, ['build'])
+})
+
 test('arrows, comparisons and heredoc bodies are not redirects', () => {
   const heredoc = "cd ~/app && python3 - <<'EOF'\nold='''\nreturn edit(play, (lines) => lines.map((l) => l))\n'''\nif a > b: print(1)\nEOF"
   for (const c of [heredoc, 'node -e "x => x > 1"', "echo 'a > b'", 'test 3 -ge 2 && echo ok', 'ls ->x'])

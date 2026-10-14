@@ -84,14 +84,60 @@ const REASONS: Record<string, string> = {
   'git reset --hard discards uncommitted changes': 'git reset --hard відкидає незакомічені зміни',
   'git clean deletes untracked files': 'git clean видаляє файли, яких немає в git',
   'git branch -D deletes a branch even if unmerged': 'git branch -D видаляє гілку, навіть незлиту',
-  'find with -delete/-exec acts on every match': 'find з -delete/-exec зачіпає кожен збіг',
+  'find -delete deletes every matching file': 'find -delete видалить кожен знайдений файл',
+  'find -exec runs a command on every match': 'find -exec запустить команду для кожного знайденого файлу',
+}
+
+const findExecUk = (r: string) => {
+  const cmd = /^find -exec (\S+) runs it on every match$/.exec(r)?.[1]
+
+  return cmd ? `find -exec запустить ${cmd} для кожного знайденого файлу` : undefined
 }
 
 export const reasonUk = (r: string) =>
-  REASONS[r] ?? (/^git (checkout|restore) overwrites/.test(r) ? 'git перезаписує файли робочої копії' : /changes permissions\/ownership recursively/.test(r) ? 'рекурсивна зміна прав або власника' : /can destroy data/.test(r) ? 'може знищити дані на рівні диска або файлу' : r)
+  REASONS[r] ??
+  findExecUk(r) ??
+  (/^git (checkout|restore) overwrites/.test(r) ? 'git перезаписує файли робочої копії' : /changes permissions\/ownership recursively/.test(r) ? 'рекурсивна зміна прав або власника' : /can destroy data/.test(r) ? 'може знищити дані на рівні диска або файлу' : r)
 
-export function hardQuestion(reasons: string[], segment: string): string {
-  return `Ризик: ${reasons.map(reasonUk).join('; ')}. Команда: ${short(segment, 120)}. Виконати?`
+const EXEC_ACTIONS: Record<string, string> = {
+  rm: 'видалить усе знайдене',
+  mv: 'перемістить усе знайдене',
+  chmod: 'змінить права для всього знайденого',
+  chown: 'змінить власника для всього знайденого',
+}
+
+/** What a risky `find` will do, in plain words: where it looks, for what, and what it then does to every match. */
+export function findSummary(args: string[]): string {
+  const value = (flag: string) => args.flatMap((w, k) => (w === flag && args[k + 1] ? [args[k + 1]!] : []))
+  const root = args[0] && !/^[-(!]/.test(args[0]) ? args[0] : '.'
+  const type = value('-type')[0]
+  const names = [...value('-name'), ...value('-iname')].map(n => `«${n}»`)
+  const depth = Number(value('-maxdepth')[0])
+  const age = /^\+(\d+)$/.exec(value('-mtime')[0] ?? '')?.[1]
+  const what = type === 'f' ? 'файли' : type === 'd' ? 'папки' : 'елементи'
+  const where = root === '.' ? 'у поточній папці' : `у ${root}`
+  const how = Number.isInteger(depth) && depth > 0 ? (depth === 1 ? 'лише на першому рівні, без вкладених папок' : `не глибше ${depth} рівнів`) : 'разом з усіма вкладеними папками'
+  const acts: string[] = []
+
+  if (args.includes('-delete')) acts.push('видалить усе знайдене')
+
+  args.forEach((w, k) => {
+    if (!['-exec', '-execdir', '-ok', '-okdir'].includes(w)) return
+
+    const cmd = (args[k + 1] ?? '').replace(/^.*\//, '')
+
+    acts.push(EXEC_ACTIONS[cmd] ?? (cmd ? `запустить ${cmd} для всього знайденого` : 'запустить команду для всього знайденого'))
+  })
+
+  const filter = `${names.length ? ` з іменем ${names.join(' або ')}` : ''}${age ? `, старіші за ${age} дн.` : ''}`
+
+  return `Шукає ${what}${filter} ${where}, ${how}, і ${[...new Set(acts)].join(' і ')}`
+}
+
+export function hardQuestion(reasons: string[], segment: string, finds: string[][] = []): string {
+  const what = finds.map(findSummary).join('; ')
+
+  return `Ризик: ${reasons.map(reasonUk).join('; ')}. ${what ? `Що зробить: ${what}. ` : ''}Команда: ${short(segment, 120)}. Виконати?`
 }
 
 export const CHOICES = ['Виконати', 'Скасувати'] as const

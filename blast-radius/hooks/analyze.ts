@@ -15,6 +15,8 @@ export interface Analysis {
   deletes: { cwd: string; targets: string[]; recursive: boolean }[]
   /** where each git command works (after `cd dir &&` and `git -C dir`), so git state is read in that repo, not the session's */
   gitDirs: string[]
+  /** the arguments of each `find` that deletes or runs a risky command, so the dialog can say in words what it will do */
+  finds: string[][]
 }
 
 /** Split a command line into words, honouring single and double quotes. */
@@ -46,10 +48,10 @@ export function words(cmd: string): string[] {
   return out
 }
 
-/** Split on ; && || | and newlines (outside quotes, roughly). */
+/** Split on ; && || | and newlines (outside quotes, roughly). A `\;` ends a `find -exec` and stays inside its segment. */
 export function segments(cmd: string): string[] {
   return cmd
-    .split(/\n|;|&&|\|\||\|/)
+    .split(/\n|(?<!\\);|&&|\|\||\|/)
     .map(s => s.trim())
     .filter(Boolean)
 }
@@ -105,9 +107,12 @@ const hasFlag = (args: string[], short: string, long?: string) =>
 
 const operands = (args: string[]) => args.filter(w => !w.startsWith('-'))
 
+const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir'])
+const FIND_READ_ONLY = new Set(['stat', 'ls', 'cat', 'wc', 'file', 'grep'])
+
 export function analyze(raw: string): Analysis {
   const cmd = stripHeredocs(raw)
-  const a: Analysis = { risk: 'none', reasons: [], paths: [], git: false, segment: '', hard: false, deletes: [], gitDirs: [] }
+  const a: Analysis = { risk: 'none', reasons: [], paths: [], git: false, segment: '', hard: false, deletes: [], gitDirs: [], finds: [] }
   // `cd dir && rm x`: relative paths belong to the directory the last cd moved to
   let cwd = ''
   const at = (p: string) => (cwd && !/^([/~]|\$)/.test(p) ? `${cwd.replace(/\/$/, '')}/${p}` : p)
@@ -182,9 +187,16 @@ export function analyze(raw: string): Analysis {
         break
       }
       case 'find': {
-        if (args.includes('-delete') || args.includes('-exec')) {
-          bump(a, 'high', 'find with -delete/-exec acts on every match', seg)
+        // -exec with a read-only command only reads the matches; -delete and any other -exec act on every match
+        const execs = args.flatMap((w, k) => (FIND_EXEC.has(w) ? [args[k + 1]] : []))
+        const risky = execs.filter(c => !c || !FIND_READ_ONLY.has(c.replace(/^.*\//, '')))
+
+        // the reasons say what the change is in words (the dialog shows them next to the command line)
+        if (args.includes('-delete')) bump(a, 'high', 'find -delete deletes every matching file', seg)
+        for (const c of risky) bump(a, 'high', c ? `find -exec ${c.replace(/^.*\//, '')} runs it on every match` : 'find -exec runs a command on every match', seg)
+        if (args.includes('-delete') || risky.length > 0) {
           push(args[0] && !args[0].startsWith('-') ? args[0] : '.')
+          a.finds.push(args)
         }
 
         break
