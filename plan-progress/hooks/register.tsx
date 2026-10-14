@@ -1588,6 +1588,8 @@ export const register: Register = on => {
       band = null
       return next(e)
     }
+    // fork (qa-mods): keep the layer below (the hud band) under the bars; without next(e) an open bar hid it
+    const below = await next(e)
     if (e.surface === 'terminal') {
       const { Box, Button, Text, Raster } = $.ui.resolve(e)
       await read($, tick)
@@ -1628,6 +1630,7 @@ export const register: Register = on => {
               </Box>
             )
           })}
+          {below}
         </Box>
       )
     }
@@ -1749,6 +1752,7 @@ export const register: Register = on => {
             ...(opened.includes(p.id) ? [detailBox(p, w, now, { Box, Text })] : []),
           ]
         })}
+        {below}
       </Box>
     )
   })

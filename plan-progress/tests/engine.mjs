@@ -162,6 +162,14 @@ export async function boot(file, kept = new Map()) {
       walk(tree)
       return found
     },
+    // the layer below (the hud band) is played by a marker node; true if the bars' render keeps it in the tree
+    keepsBelow: async surface => {
+      const marker = { type: 'Text', props: { children: 'hud-band' }, children: [] }
+      const e = { component: 'AbovePrompt', surface, requestId: 'band', viewport: { columns: 120, rows: 40, isFullscreen: false }, props: { bodyColumns: 120, hasSurvey: false } }
+      const tree = await dispatch('ui.render', e, () => marker)
+      const has = n => (Array.isArray(n) ? n.some(has) : n === marker || (!!n && typeof n === 'object' && (n.children ?? []).some(has)))
+      return has(tree)
+    },
     footer: async (surface, isFullscreen) => {
       const tree = await dispatch('ui.render', { component: 'SessionMode', surface, viewport: { columns: 120, rows: 40, isFullscreen }, props: { modes: [] } }, () => null)
       const found = []

@@ -714,6 +714,16 @@ const C = {
     const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(title)
     return [`length ${title.length}, lone surrogate ${lone}`, !lone]
   },
+  async open_bar_keeps_the_layer_below_desktop(E) {
+    await create(E)
+    const kept = await E.keepsBelow('desktop')
+    return [`layer below kept: ${kept}`, kept]
+  },
+  async open_bar_keeps_the_layer_below_terminal(E) {
+    await create(E)
+    const kept = await E.keepsBelow('terminal')
+    return [`layer below kept: ${kept}`, kept]
+  },
   async long_title_is_cut_at_a_word_with_an_ellipsis(E) {
     const words = 'слово '.repeat(40).trim()
     await E.call({ id: 'w', title: words, stages: [S('One', 'A')] })
