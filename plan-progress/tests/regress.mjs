@@ -768,6 +768,47 @@ const C = {
       flawed.glyph === '✕' && !GREEN.test(flawed.track) && clean.glyph === '✓' && GREEN.test(clean.track),
     ]
   },
+  // the narrow desktop knob (a bare round dot with an icon) and the terminal raster row follow the same rule
+  async done_over_a_failed_step_narrow_knob_is_red_cross(E) {
+    const closed = async failed => {
+      const F = await boot(file)
+      await F.call({ id: 't', title: 'Task', stages: [S('One', st('A', 'active'), 'B')] })
+      if (failed) await F.call({ id: 't', failed: 'A' })
+      await F.call({ id: 't', state: 'done' })
+      return (await F.view('t', 40)).track
+    }
+    const CROSS = 'M18 6 6 18', TICK = 'M20 6 9 17'
+    const flawed = await closed(true)
+    const clean = await closed(false)
+    const narrow = !flawed.includes('<text') && !clean.includes('<text')
+    return [
+      `narrow ${narrow}; flawed: cross ${flawed.includes(CROSS)} tick ${flawed.includes(TICK)} green ${/18883A/i.test(flawed)}; clean: tick ${clean.includes(TICK)} green ${/18883A/i.test(clean)}`,
+      narrow && flawed.includes(CROSS) && !flawed.includes(TICK) && !/18883A/i.test(flawed) && /C5353E/i.test(flawed) && clean.includes(TICK) && !clean.includes(CROSS) && /18883A/i.test(clean),
+    ]
+  },
+  async done_over_a_failed_step_terminal_row_is_red_cross(E) {
+    const RED = 0xc5353e, GREEN = 0x18883a
+    // the glyph cell of the knob: its character and the background it sits on
+    const knob = async (failed, cols) => {
+      const F = await boot(file)
+      await F.call({ id: 't', title: 'Task', stages: [S('One', st('A', 'active'), 'B')] })
+      if (failed) await F.call({ id: 't', failed: 'A' })
+      await F.call({ id: 't', state: 'done' })
+      const r = (await F.terminal(cols)).find(n => n.type === 'Raster' && n.props.key === 'track-t')
+      const w = new Uint32Array(Uint8Array.from(Buffer.from(r.props.cells, 'base64')).buffer)
+      for (let i = 0; i < w.length; i += 3) if (w[i] === 0x2715 || w[i] === 0x2713) return { glyph: String.fromCodePoint(w[i]), bg: w[i + 2] & 0xffffff }
+      return { glyph: '', bg: 0 }
+    }
+    const seen = []
+    let ok = true
+    for (const cols of [120, 40, 24]) {
+      const bad = await knob(true, cols)
+      const good = await knob(false, cols)
+      seen.push(`${cols}: ${bad.glyph}/${bad.bg.toString(16)} vs ${good.glyph}/${good.bg.toString(16)}`)
+      ok = ok && bad.glyph === '✕' && bad.bg === RED && good.glyph === '✓' && good.bg === GREEN
+    }
+    return [seen.join(' | '), ok]
+  },
   async long_title_is_cut_at_a_word_with_an_ellipsis(E) {
     const words = 'слово '.repeat(40).trim()
     await E.call({ id: 'w', title: words, stages: [S('One', 'A')] })

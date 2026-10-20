@@ -183,8 +183,8 @@ export async function boot(file, kept = new Map()) {
       walk(tree)
       return found
     },
-    view: async id => {
-      const tree = await dispatch('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: 140, hasSurvey: false } }, () => null)
+    view: async (id, cols = 140) => {
+      const tree = await dispatch('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: cols, hasSurvey: false } }, () => null)
       const found = []
       // a strip's drawing sits in a keyed row with its open button; it takes the row's key
       const walk = (n, key) => {
