@@ -68,29 +68,28 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'handoff' }, async ($, e) => {
     // the host puts the plugin's name before a toast and a reply, so the messages do not repeat it.
-    // A draft the person already typed is kept: the prompt goes after it instead of over it.
+    // A slash command only works at the start of the box, so a typed draft is kept and the command is copied instead.
     const draft = await $.prompt.read().catch(() => ({ text: '' }))
     const hasDraft = String(draft?.text ?? '').trim() !== ''
-    const filled = await $.prompt
-      .fill({ text: hasDraft ? `\n\n${HANDOFF_PROMPT}` : HANDOFF_PROMPT, mode: hasDraft ? 'append' : 'replace' })
-      .catch(() => ({ isFilled: false }))
+    const filled = hasDraft ? { isFilled: false } : await $.prompt.fill({ text: HANDOFF_PROMPT, mode: 'replace' }).catch(() => ({ isFilled: false }))
 
     if (filled.isFilled) {
-      const note = hasDraft ? 'промпт додано після твого тексту в полі вводу. Перевір і натисни Enter.' : 'промпт у полі вводу. Перевір і натисни Enter.'
+      const note = 'Команда в полі вводу. Натисни Enter.'
 
       // pressed from the hud band: a toast is enough, the transcript stays clean
       if (e.origin.kind === 'plugin') {
-        $.ui.toast(note[0]!.toUpperCase() + note.slice(1))
+        $.ui.toast(note)
 
         return {} // no text: an empty string left a blank "handoff:" reply line in the chat
       }
 
-      return { text: note[0]!.toUpperCase() + note.slice(1) }
+      return { text: note }
     }
 
     const copied = await $.ui.copy({ text: HANDOFF_PROMPT }).catch(() => ({ isCopied: false }))
+    const why = hasDraft ? 'У полі є твій текст.' : 'Поле вводу зараз не заповнити.'
 
-    return { text: `${copied.isCopied ? 'Промпт скопійовано, встав його в поле вводу.' : 'Поле вводу зараз не заповнити, скопіюй промпт нижче.'}\n\n${HANDOFF_PROMPT}` }
+    return { text: `${why} ${copied.isCopied ? 'Команду скопійовано, встав її сам' : 'Введи сам'}: ${HANDOFF_PROMPT}` }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

@@ -8,6 +8,6 @@ const prompt = file => readFileSync(new URL(file, import.meta.url), 'utf8').matc
 test('the hud button and /handoff in the handoff mod use the same prompt text', () => {
   const fromHud = prompt('../hooks/register.tsx')
 
-  assert.ok(fromHud && fromHud.length > 100)
+  assert.equal(fromHud, '/active-memory:amhandoff')
   assert.equal(fromHud, prompt('../../handoff/hooks/logic.ts'))
 })

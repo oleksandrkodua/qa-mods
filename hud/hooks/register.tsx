@@ -20,15 +20,8 @@ const ASK: Record<string, string> = {
 const CHOICES = ['Підтвердити', 'Скасувати']
 
 // The same text as HANDOFF_PROMPT in handoff/hooks/logic.ts (a test keeps the two equal): the button fills the
-// box itself, so no command runs and the chat gets no `/handoff` bubble.
-export const HANDOFF_PROMPT = `Підготуй передачу контексту в новий чат. Нічого не коміть і не деплой.
-
-1. Онови (або створи в корені проєкту) HANDOFF.md і CONTEXT.md:
-   - HANDOFF.md: що зроблено в цій сесії, що відкрито і що перевірити наступним кроком, що НЕ відкочувати.
-   - CONTEXT.md: рішення і причини, додай записи поруч з наявними, нічого не стирай.
-   - Не вигадуй: чого не підтвердив, познач як «не перевірено» і напиши, де шукав.
-2. Покажи diff обох файлів.
-3. Наприкінці дай короткий промпт для нового чату: «Спершу прочитай HANDOFF.md, потім CONTEXT.md», плюс один рядок, з якого кроку продовжити.`
+// box itself, so no command runs and the chat gets no `/handoff` bubble. It is the command of the active-memory plugin.
+export const HANDOFF_PROMPT = `/active-memory:amhandoff`
 
 const COLOR = { ok: '#30A46C', warn: '#E09A1E', hot: '#FF1F1F' } as const
 
@@ -162,24 +155,26 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const { Box, Text, Button } = $.ui.resolve(e)
     const run = (command: string) => () => void $.command.run({ command }).catch(() => undefined)
-    // fills the box (after a draft the person already typed, instead of over it); where it cannot be filled, copies the text
+    // fills an empty box with the command; a slash command only works at the start, so a typed draft is kept and the command is copied
     const fillHandoff = () =>
       void (async () => {
         const draft = await $.prompt.read().catch(() => ({ text: '' }))
         const hasDraft = String(draft?.text ?? '').trim() !== ''
-        const filled = await $.prompt
-          .fill({ text: hasDraft ? `\n\n${HANDOFF_PROMPT}` : HANDOFF_PROMPT, mode: hasDraft ? 'append' : 'replace' })
-          .catch(() => ({ isFilled: false }))
+        const filled = hasDraft ? { isFilled: false } : await $.prompt.fill({ text: HANDOFF_PROMPT, mode: 'replace' }).catch(() => ({ isFilled: false }))
 
         if (filled.isFilled) {
-          $.ui.toast(hasDraft ? 'Промпт додано після твого тексту в полі вводу. Перевір і натисни Enter.' : 'Промпт у полі вводу. Перевір і натисни Enter.')
+          $.ui.toast('Команда в полі вводу. Натисни Enter.')
 
           return
         }
 
         const copied = await $.ui.copy({ text: HANDOFF_PROMPT }).catch(() => ({ isCopied: false }))
 
-        $.ui.toast(copied.isCopied ? 'Поле вводу зараз не заповнити: промпт скопійовано, встав його сам.' : 'Поле вводу зараз не заповнити.')
+        $.ui.toast(
+          copied.isCopied
+            ? `${hasDraft ? 'У полі є твій текст' : 'Поле вводу зараз не заповнити'}: команду ${HANDOFF_PROMPT} скопійовано, встав її сам.`
+            : `${hasDraft ? 'У полі є твій текст' : 'Поле вводу зараз не заповнити'}: введи ${HANDOFF_PROMPT} сам.`,
+        )
       })()
     const confirmRun = (command: 'compact' | 'clear') => () =>
       void (async () => {

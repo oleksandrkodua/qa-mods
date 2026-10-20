@@ -15,7 +15,7 @@ const stubs = (on: any, filled = true) => {
   on('session.measure', ($: any, e: any) => ({ changed: e.changed }))
   // these two results are the plain objects the ops resolve to, not wrapped in { value }
   on('prompt.fill', ($: any, e: any) => (fillModes.push(String(e.mode)), { isFilled: filled }))
-  on('ui.copy', () => ({ isCopied: true }))
+  on('ui.copy', () => ({ value: { isCopied: true } }))
   on('ui.render', ($: any, e: any) => $.ui.resolve(e).Box({}))
   on('turn.step', async function* () {
     yield { kind: 'text', index: 0, text: 'Готово.' }
@@ -125,7 +125,7 @@ describe('handoff', () => {
 
     const ok = await $.command.run({ command: 'handoff', args: '', origin: { kind: 'composer' } })
 
-    expect(ok.text).toContain('у полі вводу')
+    expect(ok.text).toContain('Команда в полі вводу')
   })
 
   test('/handoff pressed from the hud band (origin plugin) leaves the transcript clean', async ($, on) => {
@@ -137,7 +137,7 @@ describe('handoff', () => {
     expect(out.text).toBeUndefined()
   })
 
-  test('/handoff keeps a draft the person typed: the prompt goes after it (append), an empty box is replaced', async ($, on) => {
+  test('/handoff keeps a draft the person typed (the command is copied), an empty box is filled', async ($, on) => {
     stubs(on, true)
     fillModes.length = 0
     let draft = 'мій чернетковий текст'
@@ -148,8 +148,9 @@ describe('handoff', () => {
     draft = ''
     await $.command.run({ command: 'handoff', args: '', origin: { kind: 'composer' } })
 
-    expect(fillModes).toEqual(['append', 'replace'])
-    expect(String(withDraft.text)).toContain('після твого тексту')
+    expect(fillModes).toEqual(['replace'])
+    expect(String(withDraft.text)).toContain('У полі є твій текст')
+    expect(String(withDraft.text)).toContain('/active-memory:amhandoff')
   })
 
   test('/handoff prints the prompt when the box cannot be filled', async ($, on) => {
@@ -158,6 +159,6 @@ describe('handoff', () => {
 
     const out = await $.command.run({ command: 'handoff', args: '', origin: { kind: 'composer' } })
 
-    expect(out.text).toContain('HANDOFF.md')
+    expect(out.text).toContain('/active-memory:amhandoff')
   })
 })

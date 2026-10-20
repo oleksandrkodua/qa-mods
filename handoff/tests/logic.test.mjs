@@ -12,13 +12,12 @@ test('hintLevel: nothing below the threshold, then one level per 5 points', () =
   assert.equal(hintLevel(60, 50), 3)
 })
 
-test('the prompt asks for both files and does not commit', () => {
-  assert.match(HANDOFF_PROMPT, /HANDOFF\.md/)
-  assert.match(HANDOFF_PROMPT, /CONTEXT\.md/)
-  assert.match(HANDOFF_PROMPT, /Нічого не коміть/)
+test('the prompt is the active-memory handoff command', () => {
+  assert.equal(HANDOFF_PROMPT, '/active-memory:amhandoff')
 })
 
 test('the hint names the percent and the command', () => {
   assert.match(hintLine(83), /83%/)
   assert.match(hintLine(83), /\/handoff/)
+  assert.match(hintLine(83), /amhandoff/)
 })

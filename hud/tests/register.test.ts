@@ -173,7 +173,7 @@ describe('hud', () => {
     await ui.unmount()
   })
 
-  test('Handoff fills the box itself: no command runs, an empty box is replaced, a typed draft is kept (append)', async ($, on) => {
+  test('Handoff fills the box itself: no command runs, an empty box is filled, a typed draft is kept and the command is copied', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
     stub(on)
     const ran: string[] = []
@@ -182,6 +182,8 @@ describe('hud', () => {
     on('command.run', ($: any, e: any) => (ran.push(e.command), { text: '' }))
     on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
     on('prompt.fill', ($: any, e: any) => (filled.push({ text: e.text, mode: e.mode }), { isFilled: true }))
+    const copied: string[] = []
+    on('ui.copy', ($: any, e: any) => (copied.push(e.text), { value: { isCopied: true } }))
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
     await $.session.measure(MEASURE)
 
@@ -191,11 +193,10 @@ describe('hud', () => {
     draft = 'мій чернетковий текст'
     await ui.press({ key: 'b-handoff' })
 
+    expect(HANDOFF_PROMPT).toBe('/active-memory:amhandoff')
     expect(ran).toEqual([])
-    expect(filled).toEqual([
-      { text: HANDOFF_PROMPT, mode: 'replace' },
-      { text: `\n\n${HANDOFF_PROMPT}`, mode: 'append' },
-    ])
+    expect(filled).toEqual([{ text: HANDOFF_PROMPT, mode: 'replace' }])
+    expect(copied).toEqual([HANDOFF_PROMPT])
     await ui.unmount()
   })
 
@@ -214,7 +215,7 @@ describe('hud', () => {
 
     await ui.press({ key: 'b-handoff' })
     expect(copied).toEqual([HANDOFF_PROMPT])
-    expect(toasts.at(-1)).toBe('Поле вводу зараз не заповнити: промпт скопійовано, встав його сам.')
+    expect(toasts.at(-1)).toBe('Поле вводу зараз не заповнити: команду /active-memory:amhandoff скопійовано, встав її сам.')
     await ui.unmount()
   })
 
@@ -231,7 +232,7 @@ describe('hud', () => {
     const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
 
     await ui.press({ key: 'b-handoff' })
-    expect(toasts.at(-1)).toBe('Поле вводу зараз не заповнити.')
+    expect(toasts.at(-1)).toBe('Поле вводу зараз не заповнити: введи /active-memory:amhandoff сам.')
     await ui.unmount()
   })
 

@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "0.6.2",
-  "description": "The mini Clippy beside the band above the prompt: calm / worried / panic by context fill, with random Ukrainian remarks; /handoff puts a HANDOFF.md/CONTEXT.md prompt into the input box (the hud band has its button). VS Code: a hint after the answer from 80%.",
+  "version": "0.6.3",
+  "description": "The mini Clippy beside the band above the prompt: calm / worried / panic by context fill, with random Ukrainian remarks; /handoff puts /active-memory:amhandoff into the input box (the hud band has its button). VS Code: a hint after the answer from 80%.",
   "author": {
     "name": "noaod"
   },
