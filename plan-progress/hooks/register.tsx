@@ -29,12 +29,16 @@ const FOLD_MS = 5000 // finished strips stay this long, failed ones stay until t
 const STATE_COLOR: Record<PlanState, string> = { running: '#7858CA', needs_input: '#AD6400', error: '#C5353E', done: '#18883A' }
 const INK = '#FFFFFF'
 const STATE_GLYPH: Record<PlanState, string> = { running: '●', needs_input: '?', error: '!', done: '✓' }
+// a bar closed "done" over a step in error is finished but not clean: it keeps the error colour and a ✕ instead of a green ✓
+const hasFailedStep = (p: Plan) => p.state === 'done' && p.stages.some(s => s.steps.some(x => x.status === 'error'))
+const lookOf = (p: Plan): PlanState => (hasFailedStep(p) ? 'error' : p.state)
+const glyphOf = (p: Plan) => (hasFailedStep(p) ? '✕' : STATE_GLYPH[p.state])
 const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
 const TRACK_H = 22
 const NARROW = 260 // fork (qa-mods): was 360; with it a title of ~30 characters pushed the track under the limit and the pill turned into a bare number
 
 const RULES = `# Progress bars
-Tasks needing more than ~3 edits or commands get a bar via ${TOOL}: create it once with the full breakdown (2-7 stages of steps {title, detail?}, or kind "todo" for one flat list; titles of at most 4 words, in the user's language; the first open step becomes active), then move it with short calls: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. A failed step does not close the bar: carry on with {id, active:"..."} or close it with state "done". When the plan changes, resend stages under the same id; steps sent without a status keep their done by title. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
+Tasks needing more than ~3 edits or commands get a bar via ${TOOL}: create it once with the full breakdown (2-7 stages of steps {title, detail?}, or kind "todo" for one flat list; titles of at most 4 words, in the user's language; the first open step becomes active), then move it with short calls: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. A failed step does not close the bar: carry on with {id, active:"..."} or close it with state "done" (a bar closed over a failed step shows a red ✕, not a green ✓, so report the failure to the user). When the plan changes, resend stages under the same id; steps sent without a status keep their done by title. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
 
 type Raw = Record<string, unknown>
 // the cut drops half a character left at the edge (an emoji is two UTF-16 units)
@@ -369,7 +373,7 @@ function drawTrack(p: Plan, W: number): Track {
   const from = last?.W === W ? last.x : fx
   lastHead.set(key, { W, x: fx })
 
-  const acc = hex(STATE_COLOR[p.state])
+  const acc = hex(STATE_COLOR[lookOf(p)])
   const light = mix(acc, [255, 255, 255], 0.32)
   const grey = [132, 130, 138]
   const ease = 'calcMode="spline" keyTimes="0;1" keySplines=".2 .8 .2 1"'
@@ -437,8 +441,8 @@ function drawTrack(p: Plan, W: number): Track {
 
   // knob: a pill with stage and count, or a round dot with the stage number when narrow
   const isNarrow = W < NARROW
-  const color = STATE_COLOR[p.state]
-  const icon = ICON_PATH[p.state]
+  const color = STATE_COLOR[lookOf(p)]
+  const icon = ICON_PATH[lookOf(p)]
   const single = p.stages.length === 1
   const number = single ? w.step : w.stage + 1
   let knob = ''
@@ -447,7 +451,7 @@ function drawTrack(p: Plan, W: number): Track {
   if (isNarrow) {
     const label = done ? '' : String(number)
     knob = `<circle cx="0" cy="${H / 2}" r="${H / 2}" fill="${color}"/>${
-      done ? `<path d="${ICON_PATH.done}" transform="translate(-6 5) scale(.5)" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
+      done ? `<path d="${ICON_PATH[lookOf(p)]}" transform="translate(-6 5) scale(.5)" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
     }`
   } else {
     const name = done ? (p.endedAt ? elapsed(p.endedAt - p.startedAt) : 'Done') : single ? (p.stages[0]?.name ?? 'Tasks') : (p.stages[w.stage]?.name ?? '')
@@ -766,7 +770,7 @@ function trackCells(p: Plan, W: number, t: number): string {
   const target = (done ? 1 : Math.min(1, w.pos / Math.max(1, w.total))) * W
   const fx = headAt(p.id, target, t)
   const back = termBg()
-  const acc = hex(STATE_COLOR[p.state])
+  const acc = hex(STATE_COLOR[lookOf(p)])
   const light = mix(acc, [255, 255, 255], 0.35)
   const grey = [120, 118, 128]
   const track = mix(back, [128, 128, 128], isLight ? 0.14 : 0.18)
@@ -810,11 +814,11 @@ function trackCells(p: Plan, W: number, t: number): string {
     k += s.steps.length
   })
 
-  const base = hex(STATE_COLOR[p.state])
+  const base = hex(STATE_COLOR[lookOf(p)])
   const color = base
   const single = p.stages.length === 1
   const number = single ? Math.min(w.total, w.pos + 1) : w.stage + 1
-  const icon = p.state === 'done' ? '✓' : p.state === 'error' ? '✕' : p.state === 'needs_input' ? '?' : ''
+  const icon = hasFailedStep(p) ? '✕' : p.state === 'done' ? '✓' : p.state === 'error' ? '✕' : p.state === 'needs_input' ? '?' : ''
   let name = ''
   let count = ''
   if (W < 28) {
@@ -1612,7 +1616,7 @@ export const register: Register = on => {
             return (
               <Box key={`bar-${p.id}`} flexDirection="column">
                 <Box flexDirection="row" gap={1}>
-                  <Text color={STATE_COLOR[p.state]}>{STATE_GLYPH[p.state]}</Text>
+                  <Text color={STATE_COLOR[lookOf(p)]}>{glyphOf(p)}</Text>
                   <Box width={titleW} flexShrink={0}>
                     <Text wrap="truncate">{p.title}</Text>
                   </Box>
@@ -1703,7 +1707,7 @@ export const register: Register = on => {
           const line = Svg ? [<Svg key={`div-${p.id}`} source={divider} alt="divider" width={total} height={1} />] : []
           const w = where(p)
           const pct = percent(p, w)
-          const color = STATE_COLOR[p.state]
+          const color = STATE_COLOR[lookOf(p)]
           const stageName = p.stages[w.stage]?.name ?? ''
           const alt =
             p.state === 'done'
@@ -1714,7 +1718,7 @@ export const register: Register = on => {
           return [
             ...line,
             <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
-              <Text color={color}>{STATE_GLYPH[p.state]}</Text>
+              <Text color={color}>{glyphOf(p)}</Text>
               <Box key={`title-${p.id}`} width={Math.max(4, Math.ceil(titleWidth / 8))} flexShrink={0}>
                 <Text wrap={opened.includes(p.id) ? 'wrap' : 'truncate'}>{p.title}</Text>
                 {textWidth(p.title) > titleWidth && !opened.includes(p.id) ? (

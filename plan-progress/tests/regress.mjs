@@ -750,6 +750,24 @@ const C = {
     const kept = await E.keepsBelow('terminal')
     return [`layer below kept: ${kept}`, kept]
   },
+  // a bar closed with state "done" over a failed step must not read as a clean success
+  async done_over_a_failed_step_is_not_green(E) {
+    const GREEN = /18883A/i
+    const closed = async failed => {
+      const F = await boot(file)
+      await F.call({ id: 't', title: 'Task', stages: [S('One', st('A', 'active'), 'B')] })
+      if (failed) await F.call({ id: 't', failed: 'A' })
+      await F.call({ id: 't', state: 'done' })
+      const glyph = (await F.terminal(120)).find(n => n.type === 'Text' && ['✓', '✕'].includes(n.children?.[0]))
+      return { track: (await F.view('t')).track, glyph: glyph?.children[0], pct: await pct(F, 't') }
+    }
+    const flawed = await closed(true)
+    const clean = await closed(false)
+    return [
+      `flawed: ${flawed.glyph} green ${GREEN.test(flawed.track)}; clean: ${clean.glyph} green ${GREEN.test(clean.track)}`,
+      flawed.glyph === '✕' && !GREEN.test(flawed.track) && clean.glyph === '✓' && GREEN.test(clean.track),
+    ]
+  },
   async long_title_is_cut_at_a_word_with_an_ellipsis(E) {
     const words = 'слово '.repeat(40).trim()
     await E.call({ id: 'w', title: words, stages: [S('One', 'A')] })
