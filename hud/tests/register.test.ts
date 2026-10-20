@@ -173,6 +173,29 @@ describe('hud', () => {
     await ui.unmount()
   })
 
+  test('Compact and Clear say they started once confirmed (Compact takes a model call, about 40 s, and shows nothing meanwhile)', async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
+    const toasts: string[] = []
+    stub(on, toasts)
+    on('command.run', () => ({ text: '' }))
+    on('tool.call', { tool: 'AskUserQuestion' }, ($: any, e: any) => {
+      const q = String(e.questions[0].question)
+
+      return { result: { questions: e.questions, answers: { [q]: 'Підтвердити' } } }
+    })
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.session.measure(MEASURE)
+
+    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
+
+    await ui.press({ key: 'b-compact' })
+    expect(toasts.at(-1)).toBe('Стиснення запущено: це може тривати до хвилини, чекай.')
+
+    await ui.press({ key: 'b-clear' })
+    expect(toasts.at(-1)).toBe('Очищення запущено.')
+    await ui.unmount()
+  })
+
   test('Handoff fills the box itself: no command runs, an empty box is filled, a typed draft is kept and the command is copied', async ($, on) => {
     mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
     stub(on)

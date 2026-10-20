@@ -108,6 +108,7 @@ export async function boot(file, kept = new Map()) {
     agentTool: (agentId, tool) => dispatch('tool.call', { tool, agentId, tool_use_id: uid() }, () => ({ result: {} })),
     turnComplete: (agentId, reason = 'answer') => dispatch('turn.complete', { agentId, reason }, () => ({})),
     turnStart: () => dispatch('turn.start', {}, () => ({})),
+    compose: () => dispatch('prompt.compose', {}, () => ({ sections: [] })),
     // a question from the main loop, or from a subagent's loop when agentId is given
     ask: agentId => dispatch('tool.call', { tool: 'AskUserQuestion', agentId, tool_use_id: uid() }, () => ({ result: {} })),
     // an agent's call the permission check answers "ask"; the call stays open until release().

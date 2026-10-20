@@ -180,8 +180,13 @@ export const register: Register = (on, options) => {
       void (async () => {
         const answer = await $.ui.ask(ASK[command]!, CHOICES).catch(() => CHOICES[1])
 
-        if (answer === CHOICES[0]) await $.command.run({ command }).catch(() => undefined)
-        else $.ui.toast(`${command === 'compact' ? 'Стиснення' : 'Очищення'} скасовано: нічого не змінено.`)
+        if (answer === CHOICES[0]) {
+          // Compact is a model call (about 40 s) and the host shows nothing meanwhile; /clear waits in the queue behind it
+          $.ui.toast(command === 'compact' ? 'Стиснення запущено: це може тривати до хвилини, чекай.' : 'Очищення запущено.')
+          await $.command.run({ command }).catch(() => undefined)
+        } else {
+          $.ui.toast(`${command === 'compact' ? 'Стиснення' : 'Очищення'} скасовано: нічого не змінено.`)
+        }
       })()
     const dot = (k: string) => (
       <Text key={`dot-${k}`} dimColor>

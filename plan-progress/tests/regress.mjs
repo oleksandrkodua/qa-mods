@@ -326,6 +326,32 @@ const C = {
     const r = await E.stop('All set.')
     return [`${r.block ? 'blocked' : 'passes'}`, !!r.block]
   },
+  // found in a VS Code chat (15.10.2026): the model sent {failed} once, the bar went to `error` and was never
+  // open again for the reminders, so it stayed at 0% for the rest of the chat
+  async stop_reminds_about_a_failed_bar(E) {
+    await create(E)
+    await E.call({ id: 't', failed: 'A', note: 'it broke' })
+    await E.turnStart()
+    await E.work('Edit')
+    const r = await E.stop('Done.')
+    return [`state ${E.bar('t').state}, ${r.block ? 'blocked' : 'passes'}`, E.bar('t').state === 'error' && !!r.block]
+  },
+  async edits_nudge_about_a_failed_bar(E) {
+    await create(E)
+    await E.call({ id: 't', failed: 'A', note: 'it broke' })
+    await E.turnStart()
+    let hit = false
+    for (let i = 0; i < 8; i++) {
+      const r = await E.work('Edit')
+      if ((r?.context ?? []).some(c => c.includes('not updated'))) hit = true
+    }
+    return [`nudged ${hit}`, hit]
+  },
+  async rules_say_what_to_do_after_failed(E) {
+    const out = await E.compose()
+    const rules = JSON.stringify(out)
+    return [rules.slice(0, 80), /failed/.test(rules) && /(continue|active)/.test(rules.slice(rules.indexOf('failed')))]
+  },
   async terminal_bar_is_a_raster_that_fits(E) {
     await create(E)
     const out = []

@@ -34,7 +34,7 @@ const TRACK_H = 22
 const NARROW = 260 // fork (qa-mods): was 360; with it a title of ~30 characters pushed the track under the limit and the pill turned into a bare number
 
 const RULES = `# Progress bars
-Tasks needing more than ~3 edits or commands get a bar via ${TOOL}: create it once with the full breakdown (2-7 stages of steps {title, detail?}, or kind "todo" for one flat list; titles of at most 4 words, in the user's language; the first open step becomes active), then move it with short calls: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. When the plan changes, resend stages under the same id; steps sent without a status keep their done by title. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
+Tasks needing more than ~3 edits or commands get a bar via ${TOOL}: create it once with the full breakdown (2-7 stages of steps {title, detail?}, or kind "todo" for one flat list; titles of at most 4 words, in the user's language; the first open step becomes active), then move it with short calls: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. A failed step does not close the bar: carry on with {id, active:"..."} or close it with state "done". When the plan changes, resend stages under the same id; steps sent without a status keep their done by title. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
 
 type Raw = Record<string, unknown>
 // the cut drops half a character left at the edge (an emoji is two UTF-16 units)
@@ -1014,6 +1014,9 @@ function play($: EngineInterface, name: 'decision' | 'error' | 'done') {
 // the agents bar is the mod's own; the model never owes it an update
 const AGENTS = 'agents:auto' // slug() never yields ':', so no model id can take it
 const isOpenPlan = (p: Plan) => p.id !== AGENTS && p.state === 'running' && !p.stages.flatMap(s => s.steps).every(s => isFinished(s.status))
+// a bar left in `error` (the model sent {failed}) is still unfinished work: the reminders cover it too, or it stays
+// stuck at its old percent for the rest of the chat (seen in a VS Code chat, 15.10.2026). Agent strips still go only to a running bar.
+const needsUpdate = (p: Plan) => isOpenPlan(p) || (p.id !== AGENTS && p.state === 'error' && !p.stages.flatMap(s => s.steps).every(s => isFinished(s.status)))
 
 const slug = (s: string) =>
   s
@@ -1395,7 +1398,7 @@ export const register: Register = on => {
     }
     if (!EDIT_TOOLS.has(e.tool)) return next(e)
     isWaitingOnBackground = false
-    const open = (await read($, plans)).filter(isOpenPlan)
+    const open = (await read($, plans)).filter(needsUpdate)
     const hasLivePlan = isPlanTouched || open.length > 0
     if (!hasLivePlan && !hasRefused && workCalls >= WORK_BEFORE_PLAN) {
       hasRefused = true
@@ -1421,7 +1424,7 @@ export const register: Register = on => {
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     if (e.stop_hook_active || result.block || isWaitingOnBackground || (e.background_tasks?.length ?? 0) > 0) return result
-    const open = (await read($, plans)).filter(isOpenPlan)
+    const open = (await read($, plans)).filter(needsUpdate)
     if (open.length === 0) return result
     const asks = /\?\s*$/.test(e.last_assistant_message ?? '')
     if (asks) {
@@ -1434,7 +1437,7 @@ export const register: Register = on => {
 
     return {
       ...result,
-      block: `plan-progress: ${open.map(p => p.id).join(', ')} still open. If its work is finished, update it with ${TOOL}: {id, next:true} or state "done". If the user asked to keep it open, or it waits on the user, set state "needs_input" with a note (that ends this reminder) and do not close it: the user's instruction comes first.`,
+      block: `plan-progress: ${open.map(p => p.id).join(', ')} still open (a bar in error too). If its work is finished, update it with ${TOOL}: {id, next:true} or state "done"; after a failed step carry on with {id, active}. If the user asked to keep it open, or it waits on the user, set state "needs_input" with a note (that ends this reminder) and do not close it: the user's instruction comes first.`,
     }
   })
 
