@@ -44,6 +44,9 @@ const TAG_CHARACTERS = /[\u{E0000}-\u{E007F}]/u
 const UNSEEN_CHARACTERS =
   /[\p{Cc}\p{Cf}\p{Cn}\p{Co}\p{Cs}\p{Variation_Selector}\u115f\u1160\u3164\uffa0]/gu
 const COMBINING_RUN = /(\p{M}{3})\p{M}+/gu
+// U+FFFD is what a decoder leaves for bytes it could not read: a text holding it
+// is corrupt, and drawn as is it shows black diamonds in the middle of a word.
+const BROKEN_TEXT = /\ufffd/
 
 function clean(text: string, max: number): string {
   if (TAG_CHARACTERS.test(text)) return ''
@@ -135,8 +138,9 @@ function parseSuggestions(reply: string, known: ReadonlySet<string> | null): Sug
     const prompt = (entry as { prompt?: unknown }).prompt
     if (typeof prompt !== 'string') continue
     const filled = clean(prompt, PROMPT_MAX)
-    if (filled === '' || !namesKnownCommand(filled, known)) continue
-    const named = typeof label === 'string' ? clean(label, LABEL_MAX) : ''
+    if (filled === '' || BROKEN_TEXT.test(filled) || !namesKnownCommand(filled, known)) continue
+    const cleaned = typeof label === 'string' ? clean(label, LABEL_MAX) : ''
+    const named = BROKEN_TEXT.test(cleaned) ? '' : cleaned
     items.push({ label: named === '' ? clean(filled, LABEL_MAX) : named, prompt: filled })
     if (items.length === MAX_SUGGESTIONS) break
   }

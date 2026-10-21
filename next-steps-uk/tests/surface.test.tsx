@@ -63,3 +63,17 @@ test('long labels: the first chip and "ще 2" keep it to one row', async ($, on
   expect(await ui.find({ type: 'Button', text: /Перевірити ще одну/ } as never)).toBeUndefined()
   await ui.unmount()
 })
+
+test('broken text (U+FFFD): the label falls back to its prompt, a broken prompt is dropped', async ($, on) => {
+  const reply = JSON.stringify([
+    { label: 'Результат мініт��сту', prompt: 'покажи результат міні-тесту' },
+    { label: 'Звірити питання', prompt: 'звір питання 13�15' },
+    { label: 'Урок 2', prompt: 'почни урок 2' },
+  ])
+  const ui = await offer($, on, reply)
+  expect(await ui.find({ type: 'Button', text: /�/ } as never)).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /покажи результат/ } as never)).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: /Звірити/ } as never)).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /Урок 2/ } as never)).toBeDefined()
+  await ui.unmount()
+})
