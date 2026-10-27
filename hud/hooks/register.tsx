@@ -243,13 +243,18 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" rowGap="sm">
         {survey ? below : null}
-        <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-          {parts}
-          <Button key="b-handoff" label="Handoff" onPress={fillHandoff} />
-          <Button key="b-compact" label="Compact" onPress={confirmRun('compact')} />
-          <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
-          <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
-          <Button key="b-share" label={sharing ? '🟢' : '🔴'} onPress={run('screen-share')} />
+        <Box flexDirection="row" alignItems="flex-start" justifyContent="space-between" gap={1}>
+          <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1} flexShrink={1}>
+            {parts}
+            <Button key="b-handoff" label="Handoff" onPress={fillHandoff} />
+            <Button key="b-compact" label="Compact" onPress={confirmRun('compact')} />
+            <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
+            <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
+          </Box>
+          {/* its own column: whatever the left side does (a longer cache chip, the clock mode), the share button stays top right */}
+          <Box flexShrink={0}>
+            <Button key="b-share" label={sharing ? '🟢' : '🔴'} onPress={run('screen-share')} />
+          </Box>
         </Box>
         {survey ? null : below}
       </Box>
