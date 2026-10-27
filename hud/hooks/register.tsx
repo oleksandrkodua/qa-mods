@@ -12,6 +12,8 @@ const lastReplyAt = atom({ plugin: 'hud', key: 'lastReplyAt' } as const, 0)
 const tick = atom({ plugin: 'hud', key: 'tick' } as const, 0)
 const ctx = atom({ plugin: 'hud', key: 'ctx' } as const, -1)
 const showTimes = atom({ plugin: 'hud', key: 'showTimes' } as const, false)
+// the screen-share mod's own state: the camera icon in the button row reads it (false while the mod is absent)
+const shareOn = atom({ plugin: 'screen-share', key: 'on' } as const, false)
 
 const ASK: Record<string, string> = {
   compact: 'Стиснути розмову? Її буде замінено підсумком, щоб звільнити контекст; подробиці втрачаються.',
@@ -147,6 +149,7 @@ export const register: Register = (on, options) => {
     const list = await read($, limits)
     const fill = await read($, ctx)
     const times = await read($, showTimes)
+    const sharing = await read($, shareOn)
 
     await read($, tick)
 
@@ -243,6 +246,8 @@ export const register: Register = (on, options) => {
           <Button key="b-compact" label="Compact" onPress={confirmRun('compact')} />
           <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
           <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
+          <Text key="share-dot" color={sharing ? COLOR.ok : COLOR.hot}>●</Text>
+          <Button key="b-share" label="📷" onPress={run('screen-share')} />
         </Box>
         {survey ? null : below}
       </Box>
