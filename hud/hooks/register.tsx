@@ -241,12 +241,12 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" rowGap="sm">
         {survey ? below : null}
         <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-          {parts.flatMap((p, i) => (i === 0 ? [p] : [dot(String(i)), p]))}
+          {parts}
           <Button key="b-handoff" label="Handoff" onPress={fillHandoff} />
           <Button key="b-compact" label="Compact" onPress={confirmRun('compact')} />
           <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
           <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
-          <Button key="b-share" plain onPress={run('screen-share')}>
+          <Button key="b-share" onPress={run('screen-share')}>
             <Text color={sharing ? COLOR.ok : COLOR.hot} bold>◉</Text>
           </Button>
         </Box>
