@@ -148,8 +148,6 @@ export const register: Register = (on, options) => {
     const fill = await read($, ctx)
     const times = await read($, showTimes)
 
-    if (e.props.hasSurvey) return below
-
     await read($, tick)
 
     const now = await $.clock.now()
@@ -230,8 +228,15 @@ export const register: Register = (on, options) => {
       ...(chip ? [<Text key="cache" dimColor>{chip}</Text>] : []),
     ]
 
+    // the bands below a step under the buttons: a desktop draws native buttons taller than a text row, and flush under
+    // them the plan-progress divider cut through their bottom edge; the terminal draws `sm` down as 0 cells, as before.
+    // Under a survey (the limit notice is one) the row stays and the survey goes on top; the bands below it
+    // (plan-progress, the next-step chips) yield on their own. The row has no hotkeys to take the survey's digits.
+    const survey = e.props.hasSurvey
+
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" rowGap="sm">
+        {survey ? below : null}
         <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
           {parts.flatMap((p, i) => (i === 0 ? [p] : [dot(String(i)), p]))}
           <Button key="b-handoff" label="Handoff" onPress={fillHandoff} />
@@ -239,7 +244,7 @@ export const register: Register = (on, options) => {
           <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
           <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
         </Box>
-        {below}
+        {survey ? null : below}
       </Box>
     )
   })

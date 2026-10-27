@@ -2,13 +2,13 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { HANDOFF_PROMPT } from '../hooks/register'
 
-const stub = (on: any, toasts?: string[]) => {
+const stub = (on: any, toasts?: string[], beneath?: string) => {
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
   on('session.measure', ($: any, e: any) => ({ changed: e.changed }))
   on('ui.toast', ($: any, e: any) => (toasts?.push(String(e.text ?? e.message)), { value: undefined }))
-  // the engine's own drawing beneath the plugin: an empty box
-  on('ui.render', ($: any, e: any) => $.ui.resolve(e).Box({}))
+  // the engine's own drawing beneath the plugin: an empty box, or a line standing for a survey
+  on('ui.render', ($: any, e: any) => (beneath ? h($.ui.resolve(e).Text, {}, beneath) : $.ui.resolve(e).Box({})))
 }
 
 const BAND = {
@@ -137,6 +137,34 @@ describe('hud', () => {
       expect(await ui.find({ type: 'Button', text: new RegExp(label) })).toBeDefined()
     }
 
+    await ui.unmount()
+  })
+
+  test('under a survey the hud row stays, with the survey on top (plan-progress and the next-step chips yield on their own)', async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
+    stub(on, undefined, 'ОПИТУВАННЯ')
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.session.measure(MEASURE)
+
+    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND, props: { ...BAND.props, hasSurvey: true } })
+    const column: any = (await ui.findAll({ type: 'Box' })).filter((b: any) => /ОПИТУВАННЯ/.test(b.text) && /Прогрес/.test(b.text)).at(-1)
+
+    expect(column, 'the survey and the hud row are both drawn').toBeDefined()
+    expect(column.text.indexOf('ОПИТУВАННЯ'), 'the survey on top').toBeLessThan(column.text.indexOf('Контекст'))
+    await ui.unmount()
+  })
+
+  test('the bands below sit a step under the buttons (a desktop draws native buttons taller than a text row)', async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-06T10:00:00Z') })
+    stub(on)
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.session.measure(MEASURE)
+
+    const ui = await $.ui.mount({ plugin: 'hud', surface: 'desktop', ...BAND })
+    const column: any = (await ui.findAll({ type: 'Box' })).filter((b: any) => b.props.flexDirection === 'column' && /Прогрес/.test(b.text)).at(-1)
+
+    // a step: the terminal draws `sm` down as 0 cells, as before, and a desktop on its own scale
+    expect(column?.props.rowGap).toBe('sm')
     await ui.unmount()
   })
 
