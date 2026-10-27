@@ -64,6 +64,18 @@ test('long labels: the first chip and "ще 2" keep it to one row', async ($, on
   await ui.unmount()
 })
 
+test('long labels opened: the rest join the same wrapping row, spaced by steps (desktop buttons are taller than a text row)', async ($, on) => {
+  const ui = await offer($, on, three('Запустити повний регрес blast-radius', 'Перевірити ще одну гілку у sudo', 'Зібрати підсумок усього тесту'))
+  await ui.press({ key: 'more' } as never)
+  const rows = (await ui.findAll({ type: 'Box' } as never)).filter((b: any) => /Далі/.test(b.text) && /Перевірити ще одну/.test(b.text) && /менше/.test(b.text))
+  // the innermost Box that holds them all is the chip row itself, not a column of two rows
+  const row: any = rows.at(-1)
+  expect(row?.props.flexDirection, 'one row Box holds every chip').toBe('row')
+  expect(row?.props.flexWrap).toBe('wrap')
+  expect(row?.props.rowGap, 'a step, so a desktop spaces its taller buttons').toBe('md')
+  await ui.unmount()
+})
+
 test('broken text (U+FFFD): the label falls back to its prompt, a broken prompt is dropped', async ($, on) => {
   const reply = JSON.stringify([
     { label: 'Результат мініт��сту', prompt: 'покажи результат міні-тесту' },

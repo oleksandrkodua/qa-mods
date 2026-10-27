@@ -241,7 +241,10 @@ export const register: Register = (on, options) => {
         error => $.ui.toast(`could not fill: ${String(error)}`),
       )
     }
-    // one row whatever the count: all chips when their text is short, otherwise the first one and "ще N ▾" that opens the rest underneath
+    // one row whatever the count: all chips when their text is short, otherwise the first one and "ще N ▾" that opens the rest.
+    // The rest join the same wrapping row: a second row Box sat flush under the first, and a desktop's native buttons,
+    // taller than a text row, overlapped it. Spacing is in steps, which the terminal draws as the cells it had (1 across, 1 down)
+    // and a desktop sizes on its own scale.
     const isShort = items.reduce((n, i) => n + [...i.label].length, 0) <= ONE_ROW_CHARS
     const shown = isShort || isOpened ? items : items.slice(0, 1)
     const rest = isShort ? [] : items.slice(1)
@@ -249,9 +252,9 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {below}
-        <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1} marginTop={1}>
+        <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="sm" rowGap="md" marginTop="md">
           <Text dimColor>Далі</Text>
-          {(isShort ? shown : items.slice(0, 1)).map((item, index) => (
+          {shown.map((item, index) => (
             <Button key={`s${index}`} hotkey={String(index + 1)} label={item.label} onPress={press(item)} />
           ))}
           {rest.length > 0 ? (
@@ -259,13 +262,6 @@ export const register: Register = (on, options) => {
           ) : null}
           <Button key="dismiss" plain dimColor label="✕" onPress={() => show($, { kind: 'hidden' })} />
         </Box>
-        {rest.length > 0 && isOpened ? (
-          <Box flexDirection="row" flexWrap="wrap" gap={1}>
-            {rest.map((item, index) => (
-              <Button key={`r${index}`} hotkey={String(index + 2)} label={item.label} onPress={press(item)} />
-            ))}
-          </Box>
-        ) : null}
       </Box>
     )
   })
