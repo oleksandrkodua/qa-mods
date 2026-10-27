@@ -246,8 +246,9 @@ export const register: Register = (on, options) => {
           <Button key="b-compact" label="Compact" onPress={confirmRun('compact')} />
           <Button key="b-clear" label="Clear" onPress={confirmRun('clear')} />
           <Button key="b-progress" label="Прогрес" onPress={run('progress')} />
-          <Text key="share-dot" color={sharing ? COLOR.ok : COLOR.hot}>●</Text>
-          <Button key="b-share" label="📷" onPress={run('screen-share')} />
+          <Button key="b-share" onPress={run('screen-share')}>
+            <Text color={sharing ? COLOR.ok : COLOR.hot}>{'📷\uFE0E'}</Text>
+          </Button>
         </Box>
         {survey ? null : below}
       </Box>
