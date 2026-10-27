@@ -1,3 +1,8 @@
+// @ts-nocheck
+// The drawing code below came from a canvas mock-up as plain JavaScript: untyped arrow parameters and per-character
+// objects whose fields differ (the cat's eyes, the dog's head, the wizard's arms), about 111 strict-mode errors in tsc.
+// Typing it would mean rewriting it; the exported API keeps its own annotations (Who, State, characterSvg,
+// characterAlt), so register.tsx and the tests are still type-checked against it.
 /**
  * The four helpers (paperclip, wizard, dog, cat) as one animated SVG for the desktop `Svg` element (drawn with
  * `isInteractive`, the only way SMIL plays there): 31 emotions, and the behaviours of the Office assistants
