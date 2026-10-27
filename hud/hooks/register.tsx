@@ -195,6 +195,9 @@ export const register: Register = (on, options) => {
       </Text>
     )
 
+    // the %/⏱ switch sits between the 5г and 7д figures, in place of the dot that was there
+    const timesButton = <Button key="b-times" label={times ? '%' : '⏱'} onPress={() => void update($, showTimes, v => !v)} />
+
     const chip = cacheChip(await read($, lastReplyAt), ttl, now)
     const parts = [
       fill < 0 ? (
@@ -213,7 +216,7 @@ export const register: Register = (on, options) => {
         : [
             <Box key="limits" flexDirection="row" alignItems="center" gap={1}>
               {list.flatMap((l, i) => [
-                ...(i > 0 ? [dot(`l${i}`)] : []),
+                ...(i > 0 ? [i === 1 ? timesButton : dot(`l${i}`)] : []),
                 isReset(l.resetsAt, now) ? (
                   <Text key={`limit-${l.kind}`} dimColor>{`${bandLabel(l.kind)} скинуто`}</Text>
                 ) : (
@@ -225,7 +228,7 @@ export const register: Register = (on, options) => {
                   </Text>
                 ),
               ])}
-              <Button key="b-times" label={times ? '%' : '⏱'} onPress={() => void update($, showTimes, v => !v)} />
+              {list.length === 1 ? timesButton : null}
             </Box>,
           ]),
       ...(chip ? [<Text key="cache" dimColor>{chip}</Text>] : []),
