@@ -1652,8 +1652,9 @@ export const register: Register = on => {
     // a few letters; use the wider estimate and let a title take up to 40% of the band
     // titleWidth is in px (for the SVG track); a Box width is in columns, ~8 px each
     const titleWidth = Math.min(Math.round(total * 0.4), Math.max(...list.map(p => Math.round(textWidth(p.title)))))
-    // fork (qa-mods): the 140 px gutter left of the bars (Clippy) is not in bodyColumns; without it the percent and the close button fell off the edge
-    const trackW = Math.max(120, Math.min(1400, total - titleWidth - (list.some(p => textWidth(p.title) > titleWidth) ? 240 : 210)))
+    // fork (qa-mods): the right part takes 140 px as upstream, 30 more for the ▾ of a cut title. The 70 px once kept for
+    // the handoff Clippy's column left of the bars is gone: that column is as narrow as its picture again (handoff 0.7.0)
+    const trackW = Math.max(120, Math.min(1400, total - titleWidth - (list.some(p => textWidth(p.title) > titleWidth) ? 170 : 140)))
     await read($, tick)
     const opened = await read($, expanded)
     // fork (qa-mods): a bar finished more than DONE_HOLD_MS ago folds into one line, "✓ N готово ▾", on top of the bars

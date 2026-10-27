@@ -32,6 +32,24 @@ const w = (await E.svgs()).find(x => x.alt.startsWith(TITLE + ':')).width
 assert.ok(w > 300 && w < 700, `track width ${w}`)
 console.log('ok   qa_fork_title_room_track_width', w)
 
+// the right part of a row (glyph, gaps, percent, close button) takes 140 px, as upstream: the handoff helper left of the
+// bands is as narrow as its picture again, so the 70 px once kept for the wide Clippy column only shortened the track.
+// At 120 columns (960 px) it is what the track and the title cell leave; the cell is ceil(title px / 8) columns, so the
+// figure comes out up to 8 px under the real one.
+const byKey = (n, key) => {
+  if (Array.isArray(n)) return n.map(c => byKey(c, key)).find(Boolean) ?? null
+  if (!n || typeof n !== 'object') return null
+  return n.props?.key === key ? n : byKey(n.children ?? [], key)
+}
+const rightPart = async () => {
+  const titleCols = byKey(await render(120), 'title-a')?.props.width
+  const track = (await E.svgs()).find(x => x.alt.startsWith(TITLE + ':')).width
+  return 960 - track - 8 * titleCols
+}
+const plain = await rightPart()
+assert.ok(plain > 132 && plain <= 140, `right part ${plain} px with a title that fits`)
+console.log('ok   qa_fork_right_part_takes_140px', plain)
+
 // a title that does not fit gets a ▾ button that opens it in full (wrapped); a short title gets none
 const buttons = tree => {
   const out = []
@@ -69,6 +87,11 @@ const widths = tree => {
 const ws = widths(await render(120))
 assert.ok(ws.length > 0 && ws.every(x => x <= 120 * 0.45), `Box widths in columns: ${ws}`)
 console.log('ok   qa_fork_title_box_width_is_in_columns', ws.join(','))
+
+// with a cut title among the bars the right part also holds its ▾: 30 px more
+const cut = await rightPart()
+assert.ok(cut > 162 && cut <= 170, `right part ${cut} px with a cut title`)
+console.log('ok   qa_fork_right_part_with_expand_button_takes_170px', cut)
 
 // qa.14: a finished bar stays a full row for 60 s, then folds into one line "✓ N готово ▾" on top of the bars
 {
