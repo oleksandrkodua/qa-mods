@@ -12,7 +12,8 @@ const lastReplyAt = atom({ plugin: 'hud', key: 'lastReplyAt' } as const, 0)
 const tick = atom({ plugin: 'hud', key: 'tick' } as const, 0)
 const ctx = atom({ plugin: 'hud', key: 'ctx' } as const, -1)
 const showTimes = atom({ plugin: 'hud', key: 'showTimes' } as const, false)
-// the screen-share mod's own state; null until that mod has set it (or when it is absent): then no button is drawn
+// the screen-share mod's own state; null until that mod has set it, when it is absent or when /mods has it off: then no button is drawn
+const shareOff = atom({ plugin: 'screen-share', key: 'disabled' } as const, false)
 const shareOn = atom({ plugin: 'screen-share', key: 'on' } as const, null as boolean | null)
 
 const ASK: Record<string, string> = {
@@ -149,7 +150,7 @@ export const register: Register = (on, options) => {
     const list = await read($, limits)
     const fill = await read($, ctx)
     const times = await read($, showTimes)
-    const sharing = await read($, shareOn)
+    const sharing = (await read($, shareOff)) ? null : await read($, shareOn)
 
     await read($, tick)
 
