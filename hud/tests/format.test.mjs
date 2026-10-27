@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { bandPlaceholders, cacheChip, cacheLeft, countdown, isReset, report, tone, untilReset } from '../hooks/format.ts'
+import { bandPlaceholders, cacheChip, cacheLeft, countdown, isReset, report, tone, untilReset, untilResetShort } from '../hooks/format.ts'
 
 test('countdown', () => {
   assert.equal(countdown(59 * 60000 + 49000), '59:49')
@@ -16,6 +16,14 @@ test('untilReset', () => {
   assert.equal(untilReset('2026-10-09T13:00:00Z', now), '3д 3г')
   assert.equal(untilReset('2026-10-06T09:00:00Z', now), '')
   assert.equal(untilReset(undefined, now), '')
+})
+
+test('untilResetShort keeps only the days from a day up', () => {
+  const now = Date.parse('2026-10-06T10:00:00Z')
+  assert.equal(untilResetShort('2026-10-09T13:00:00Z', now), '3д')
+  assert.equal(untilResetShort('2026-10-06T11:07:00Z', now), '1г 07х')
+  assert.equal(untilResetShort('2026-10-06T10:25:00Z', now), '25х')
+  assert.equal(untilResetShort(undefined, now), '')
 })
 
 test('tone thresholds', () => {

@@ -40,6 +40,13 @@ export function untilReset(resetsAt: string | undefined, now: number): string {
   return h > 0 ? `${h}г ${String(m).padStart(2, '0')}х` : `${m}х`
 }
 
+/** The same for the narrow band: from a day up only the days ("6д"), so the row keeps its place for the camera button. */
+export function untilResetShort(resetsAt: string | undefined, now: number): string {
+  const full = untilReset(resetsAt, now)
+
+  return /^\d+д /.test(full) ? full.split(' ')[0]! : full
+}
+
 /** True when the window's reset time has passed: the saved percent belongs to a window that no longer exists. */
 export function isReset(resetsAt: string | undefined, now: number): boolean {
   if (!resetsAt) return false

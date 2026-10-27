@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 
 import type { Limit } from '../types'
 
-import { bandLabel, bandPlaceholders, cacheChip, cacheLeft, isReset, limitLabel, report, tone, untilReset } from './format'
+import { bandLabel, bandPlaceholders, cacheChip, cacheLeft, isReset, limitLabel, report, tone, untilResetShort } from './format'
 
 const limits = atom({ plugin: 'hud', key: 'limits' } as const, [])
 const usd = atom({ plugin: 'hud', key: 'usd' } as const, null)
@@ -223,7 +223,7 @@ export const register: Register = (on, options) => {
                   <Text key={`limit-${l.kind}`}>
                     <Text dimColor>{`${bandLabel(l.kind)} `}</Text>
                     <Text color={COLOR[tone(l.percentUsed, warnAt, redAt)]} bold={l.percentUsed >= redAt}>
-                      {times ? untilReset(l.resetsAt, now) || '—' : `${Math.round(l.percentUsed)}%`}
+                      {times ? untilResetShort(l.resetsAt, now) || '—' : `${Math.round(l.percentUsed)}%`}
                     </Text>
                   </Text>
                 ),
