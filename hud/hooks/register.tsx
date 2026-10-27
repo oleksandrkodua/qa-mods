@@ -12,8 +12,8 @@ const lastReplyAt = atom({ plugin: 'hud', key: 'lastReplyAt' } as const, 0)
 const tick = atom({ plugin: 'hud', key: 'tick' } as const, 0)
 const ctx = atom({ plugin: 'hud', key: 'ctx' } as const, -1)
 const showTimes = atom({ plugin: 'hud', key: 'showTimes' } as const, false)
-// the screen-share mod's own state: the camera icon in the button row reads it (false while the mod is absent)
-const shareOn = atom({ plugin: 'screen-share', key: 'on' } as const, false)
+// the screen-share mod's own state; null until that mod has set it (or when it is absent): then no button is drawn
+const shareOn = atom({ plugin: 'screen-share', key: 'on' } as const, null as boolean | null)
 
 const ASK: Record<string, string> = {
   compact: 'Стиснути розмову? Її буде замінено підсумком, щоб звільнити контекст; подробиці втрачаються.',
@@ -253,7 +253,7 @@ export const register: Register = (on, options) => {
           </Box>
           {/* its own column: whatever the left side does (a longer cache chip, the clock mode), the share button stays top right */}
           <Box flexShrink={0}>
-            <Button key="b-share" label={sharing ? '🟢' : '🔴'} onPress={run('screen-share')} />
+            {sharing === null ? null : <Button key="b-share" label={sharing ? '🟢' : '🔴'} onPress={run('screen-share')} />}
           </Box>
         </Box>
         {survey ? null : below}
