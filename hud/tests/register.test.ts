@@ -2,7 +2,10 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { HANDOFF_PROMPT } from '../hooks/register'
 
-const stub = (on: any, toasts?: string[], beneath?: string) => {
+const stub = (on: any, toasts?: string[], beneath?: string, switches?: { raw?: string }) => {
+  mock.env(on, { HOME: '/Users/test' })
+  on('fs.exists', ($: any, e: any) => ({ value: e.path === '/Users/test/.claude/mods/switches.json' && switches?.raw !== undefined }))
+  on('fs.read', () => ({ value: switches?.raw ?? '{}' }))
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
   on('session.measure', ($: any, e: any) => ({ changed: e.changed }))
@@ -25,6 +28,38 @@ const MEASURE = {
   cost: { usd: 0.1 },
   changed: ['context', 'cost', 'rateLimits'],
 } as const
+
+for (const surface of ['desktop', 'terminal'] as const) {
+  test(`switches.json disables HUD without hiding lower layers (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const switches: { raw?: string } = { raw: '{"handoff":false}' }
+    const toasts: string[] = []
+    stub(on, toasts, 'layer below', switches)
+    await $.session.start({ surface, isInteractive: true, cwd: '/work' })
+    await $.session.measure(MEASURE)
+    toasts.length = 0
+    const ui = await $.ui.mount({ plugin: 'hud', surface, ...BAND })
+    expect(await ui.find({ type: 'Button', text: 'Handoff' })).toBeDefined()
+    switches.raw = '{"hud":false}'
+    await clock.advance(3100)
+    expect(await ui.find({ type: 'Button', text: 'Handoff' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'layer below' })).toBeDefined()
+    await $.session.measure({ ...MEASURE, rateLimits: [{ kind: 'five_hour', percentUsed: 95 }] })
+    expect(toasts).toHaveLength(0)
+    const off = await $.command.run({ command: 'hud', args: '', origin: { kind: 'composer' } })
+    expect(off.text).toContain('вимкнено')
+    switches.raw = '{invalid'
+    await clock.advance(3100)
+    expect(await ui.find({ type: 'Button', text: 'Handoff' })).toBeUndefined()
+    switches.raw = undefined
+    await clock.advance(3100)
+    expect(await ui.find({ type: 'Button', text: 'Handoff' })).toBeDefined()
+    const before = (await ui.find({ type: 'Text', text: /^кеш / }))?.text
+    await clock.advance(1100)
+    expect((await ui.find({ type: 'Text', text: /^кеш / }))?.text).not.toBe(before)
+    await ui.unmount()
+  })
+}
 
 describe('hud', () => {
   test('/hud before any measurement says there is no data', async ($, on) => {

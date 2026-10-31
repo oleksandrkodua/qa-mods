@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { Limit } from '../types'
 
@@ -12,6 +12,7 @@ const lastReplyAt = atom({ plugin: 'hud', key: 'lastReplyAt' } as const, 0)
 const tick = atom({ plugin: 'hud', key: 'tick' } as const, 0)
 const ctx = atom({ plugin: 'hud', key: 'ctx' } as const, -1)
 const showTimes = atom({ plugin: 'hud', key: 'showTimes' } as const, false)
+const disabled = atom({ plugin: 'hud', key: 'disabled' } as const, false)
 // the screen-share mod's own state; null until that mod has set it, when it is absent or when /mods has it off: then no button is drawn
 const shareOff = atom({ plugin: 'screen-share', key: 'disabled' } as const, false)
 const shareOn = atom({ plugin: 'screen-share', key: 'on' } as const, null as boolean | null)
@@ -27,6 +28,40 @@ const CHOICES = ['Підтвердити', 'Скасувати']
 export const HANDOFF_PROMPT = `/active-memory:amhandoff`
 
 const COLOR = { ok: '#30A46C', warn: '#E09A1E', hot: '#FF1F1F' } as const
+
+let switchPath = ''
+let stop: { cancel: () => void } | null = null
+let lastReply = 0
+
+function startClock($: EngineInterface, ttl: number, now: number) {
+  if (stop !== null || lastReply === 0 || cacheLeft(lastReply, ttl, now) === 0) return
+  stop = $.clock.every(1000, () => {
+    void (async () => {
+      await update($, tick, n => n + 1)
+      if (cacheLeft(lastReply, ttl, await $.clock.now()) === 0) {
+        stop?.cancel()
+        stop = null
+      }
+    })()
+  })
+}
+
+async function refreshSwitch($: EngineInterface, ttl: number) {
+  try {
+    const raw = (await $.fs.exists(switchPath)) ? String(await $.fs.read(switchPath)) : '{}'
+    const value = JSON.parse(raw)?.hud === false
+    if (value !== (await read($, disabled))) await update($, disabled, () => value)
+    if (value) {
+      stop?.cancel()
+      stop = null
+    } else {
+      if (lastReply === 0) lastReply = await read($, lastReplyAt)
+      startClock($, ttl, await $.clock.now())
+    }
+  } catch {
+    // Keep the last valid setting while the file is unreadable or malformed.
+  }
+}
 
 /**
  * HUD: one line above the prompt: context fill, rate-limit windows and a `кеш 59:48` chip (m:ss, ticking every second) while the prompt-cache
@@ -47,10 +82,14 @@ export const register: Register = (on, options) => {
   const ctxRed = Number(options?.ctxRedPercent) > 0 ? Number(options.ctxRedPercent) : 80
   const alarmed = new Set<string>()
   const warned = new Set<string>()
-  let stop: (() => void) | null = null
-  let lastReply = 0
 
   on('session.start', async ($, e, next) => {
+    const home = await $.env.get('HOME').catch(() => undefined)
+    if (home) {
+      switchPath = `${home}/.claude/mods/switches.json`
+      await refreshSwitch($, ttl)
+      $.clock.every(3000, () => void refreshSwitch($, ttl))
+    }
     // a name already taken must not break the mod
     await $.command.register({ name: 'hud', description: 'Show rate limits, session cost and the prompt-cache countdown as text' }).catch(() => undefined)
 
@@ -80,6 +119,7 @@ export const register: Register = (on, options) => {
   })
 
   on('session.measure', async ($, e, next) => {
+    if (await read($, disabled)) return next(e)
     const now = await $.clock.now()
 
     // an empty reading (no reply yet, or not a subscription) must not wipe the saved windows
@@ -116,23 +156,12 @@ export const register: Register = (on, options) => {
     }
 
     // one-second redraw only while a cache countdown is running
-    if (stop === null && lastReply > 0) {
-      stop = $.clock.every(1000, () => {
-        void (async () => {
-          await update($, tick, n => n + 1)
-
-          if (cacheLeft(lastReply, ttl, await $.clock.now()) === 0) {
-            stop?.()
-            stop = null
-          }
-        })()
-      })
-    }
+    startClock($, ttl, now)
 
     return next(e)
   })
 
-  on('command.run', { command: 'hud' }, async $ => ({
+  on('command.run', { command: 'hud' }, async $ => (await read($, disabled)) ? { text: 'HUD вимкнено. Увімкни його через /mods.' } : ({
     text: report({
       limits: await read($, limits),
       usd: await read($, usd),
@@ -147,6 +176,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
+    if (await read($, disabled)) return below
     const list = await read($, limits)
     const fill = await read($, ctx)
     const times = await read($, showTimes)

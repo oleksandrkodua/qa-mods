@@ -3,6 +3,7 @@ export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
 declare module 'claude-code' {
   interface PluginState {
     hud: {
+      disabled: boolean
       limits: Limit[]
       usd: number | null
       // true while the limits shown were saved by an earlier session and no reply has refreshed them
