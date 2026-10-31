@@ -186,6 +186,7 @@ export const register: Register = (on, options) => {
 
   // A new turn (typed or otherwise) hides whatever was offered.
   on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
     isOpened = false
     if (view.kind !== 'hidden') show($, { kind: 'hidden' })
     return next(e)
@@ -194,7 +195,7 @@ export const register: Register = (on, options) => {
   // Turn over: ask the fork, detached, so the turn's completion never waits on it.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    if (isVscode || e.reason !== 'answer' || e.answer.trim().length < minTurnChars) return result
+    if (e.agentId !== undefined || isVscode || e.reason !== 'answer' || e.answer.trim().length < minTurnChars) return result
     const turnId = e.turnId
     show($, { kind: 'loading', turnId })
     void (async () => {

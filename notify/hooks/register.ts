@@ -31,7 +31,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.start', async ($, e, next) => {
-    turnStartedAt = await $.clock.now()
+    if (e.agentId === undefined) turnStartedAt = await $.clock.now()
 
     return next(e)
   })

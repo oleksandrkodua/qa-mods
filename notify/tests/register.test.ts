@@ -7,6 +7,22 @@ const stubs = (on: any, toasts: string[], argvs: string[][]) => {
 }
 
 describe('notify', () => {
+  test('a subagent start does not reset the main turn timer', async ($, on) => {
+    const clock = mock.clock(on, { now: 1000 })
+    const toasts: string[] = []
+    stubs(on, toasts, [])
+    on('turn.start', ($, e) => ({ turnId: e.turnId }))
+    on('turn.complete', () => ({ text: '' }))
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.turn.start({ text: 'work', turnId: 'main' })
+    await clock.advance(90_000)
+    await $.turn.start({ text: 'child', turnId: 'child', agentId: 'agent-1' } as any)
+    await clock.advance(60_000)
+    await $.turn.complete({ turnId: 'main', reason: 'answer', answer: 'done', durationMs: 150_000, isAborted: false } as any)
+
+    expect(toasts).toEqual(['✔ Claude finished after 2m 30s'])
+  })
+
   test('a Bash command that ran 45 s gives a toast and a macOS notification', async ($, on) => {
     const clock = mock.clock(on)
     const toasts: string[] = []

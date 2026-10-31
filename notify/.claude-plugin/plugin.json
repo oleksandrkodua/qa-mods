@@ -1,6 +1,6 @@
 {
   "name": "notify",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A quick pop-up (toast, plus a macOS system notification) when a long Bash command or a long turn finishes, so you can stop watching it.",
   "author": { "name": "noaod" },
   "userConfig": {

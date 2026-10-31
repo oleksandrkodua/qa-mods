@@ -36,6 +36,15 @@ test('desktop: a long answer asks the fork and the band offers the suggestion', 
   await ui.unmount()
 })
 
+test('a subagent answer does not request a suggestion fork', async ($, on) => {
+  const forks: string[] = []
+  stubs(on, forks)
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' } as never)
+  await $.turn.complete({ turnId: 'child', agentId: 'agent-1', answer: ANSWER, durationMs: 1, isAborted: false, reason: 'answer' } as never)
+  await new Promise(r => setTimeout(r, 0))
+  expect(forks).toHaveLength(0)
+})
+
 const three = (a: string, b: string, c: string) => JSON.stringify([{ label: a, prompt: 'p1' }, { label: b, prompt: 'p2' }, { label: c, prompt: 'p3' }])
 const offer = async ($: any, on: any, reply: string) => {
   stubs(on, [], reply)
@@ -45,6 +54,16 @@ const offer = async ($: any, on: any, reply: string) => {
 
   return $.ui.mount({ plugin: 'next-steps-uk', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { bodyRows: 10 }, view: {} } } as never)
 }
+
+test('a subagent start keeps the main turn suggestions; a main turn start hides them', async ($, on) => {
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  const ui = await offer($, on, three('Запусти тести', 'Перевір код', 'Покажи зміни'))
+  await $.turn.start({ text: 'child', turnId: 'child', agentId: 'agent-1' } as never)
+  expect(await ui.find({ type: 'Button', text: /Запусти тести/ } as never)).toBeDefined()
+  await $.turn.start({ text: 'next', turnId: 'main' } as never)
+  expect(await ui.find({ type: 'Button', text: /Запусти тести/ } as never)).toBeUndefined()
+  await ui.unmount()
+})
 
 test('short labels: all three are chips in one row, no "ще"', async ($, on) => {
   const ui = await offer($, on, three('Видалити файл', 'Запис у settings', 'Підсумок'))
