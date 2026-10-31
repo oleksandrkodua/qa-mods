@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { BEHAVIORS, WHO, characterAlt, characterSvg } from './characters'
 import type { State, Who } from './characters'
@@ -10,12 +10,25 @@ import { nextDelay, pickPhrase } from './phrases'
 const remark = atom({ plugin: 'handoff', key: 'remark' } as const, '')
 const chosen = atom({ plugin: 'handoff', key: 'who' } as const, '')
 const act = atom({ plugin: 'handoff', key: 'behavior' } as const, '')
+const disabled = atom({ plugin: 'handoff', key: 'disabled' } as const, false)
 
 // the helper's dot: a desktop draws a Button's label alone (no colour, no size), so its colour is an emoji
 // (⚪ asks for its emoji form, U+FE0F: by default it is a small text ring beside the other three)
 const DOT: Record<Who, string> = { clippy: '⚪️', wizard: '🔵', dog: '🟠', cat: '🟢' }
 
 const ACT_MS = 6000
+
+let switchPath = ''
+
+async function refreshSwitch($: EngineInterface) {
+  try {
+    const raw = (await $.fs.exists(switchPath)) ? String(await $.fs.read(switchPath)) : '{}'
+    const value = JSON.parse(raw)?.handoff === false
+    if (value !== (await read($, disabled))) await update($, disabled, () => value)
+  } catch {
+    // Keep the last valid setting while the file is unreadable or malformed.
+  }
+}
 
 /** A stored choice that is not one of the four helpers is the paperclip. */
 const pickWho = (v: unknown): Who => ((WHO as readonly unknown[]).includes(v) ? (v as Who) : 'clippy')
@@ -62,6 +75,12 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     surface = String(e.surface ?? '')
+    const home = await $.env.get('HOME').catch(() => undefined)
+    if (home) {
+      switchPath = `${home}/.claude/mods/switches.json`
+      await refreshSwitch($)
+      $.clock.every(3000, () => void refreshSwitch($))
+    }
 
     if (!whoLoaded) {
       whoLoaded = true
@@ -75,6 +94,7 @@ export const register: Register = (on, options) => {
   })
 
   on('session.measure', async ($, e, next) => {
+    if (await read($, disabled)) return next(e)
     percent = Math.round(e.context.percent ?? 0)
 
     if (!whoLoaded) {
@@ -92,6 +112,7 @@ export const register: Register = (on, options) => {
       nextActAt = (await $.clock.now()) + nextDelay(everySeconds * 2, Math.random)
       $.clock.every(5000, () => {
         void (async () => {
+          if (await read($, disabled)) return
           const now = await $.clock.now()
 
           // now and then, while calm, a rare behaviour of the helper (twice as rare as the remarks)
@@ -119,7 +140,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const r = await next(e)
 
-    if (r?.isError === true) void play($, 'alert').catch(() => undefined)
+    if (r?.isError === true && !(await read($, disabled))) void play($, 'alert').catch(() => undefined)
 
     return r
   }).catch(($, e, next) => next(e)) // an observer: should it fail, the tool's own answer (replayed, not run twice) goes on
@@ -128,12 +149,13 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
 
-    if (e.agentId === undefined && !e.isAborted) void play($, 'congratulate').catch(() => undefined)
+    if (e.agentId === undefined && !e.isAborted && !(await read($, disabled))) void play($, 'congratulate').catch(() => undefined)
 
     return r
   })
 
   on('command.run', { command: 'handoff' }, async ($, e) => {
+    if (await read($, disabled)) return { text: 'Handoff вимкнено. Увімкни його через /mods.' }
     // the host puts the plugin's name before a toast and a reply, so the messages do not repeat it.
     // A slash command only works at the start of the box, so a typed draft is kept and the command is copied instead.
     const draft = await $.prompt.read().catch(() => ({ text: '' }))
@@ -160,6 +182,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (await read($, disabled)) return next(e)
     // under a survey (the limit notice is one) the helper stays beside it, and the survey, drawn by the layers below
     // on top of the hud row, stays the first line: no remark above it
     const survey = e.props.hasSurvey
@@ -221,7 +244,7 @@ export const register: Register = (on, options) => {
         last = value.index
       } else if (value.kind === 'tool') {
         sawTool = true
-      } else if (value.kind === 'stop' && surface === 'vscode' && e.agentId === undefined && !sawTool && value.stopReason === 'end_turn' && last >= 0) {
+      } else if (value.kind === 'stop' && surface === 'vscode' && e.agentId === undefined && !sawTool && value.stopReason === 'end_turn' && last >= 0 && !(await read($, disabled))) {
         const level = hintLevel(percent, at)
 
         if (level > hinted) {

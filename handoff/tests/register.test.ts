@@ -9,7 +9,10 @@ const STEP = { turnId: 't1', index: 0, model: 'm', messageCount: 1 }
 
 const fillModes: string[] = []
 
-const stubs = (on: any, filled = true, store: Record<string, unknown> = {}, beneath?: string) => {
+const stubs = (on: any, filled = true, store: Record<string, unknown> = {}, beneath?: string, switches?: { raw?: string }) => {
+  mock.env(on, { HOME: '/Users/test' })
+  on('fs.exists', ($: any, e: any) => ({ value: e.path === '/Users/test/.claude/mods/switches.json' && switches?.raw !== undefined }))
+  on('fs.read', () => ({ value: switches?.raw ?? '{}' }))
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('store.get', ($: any, e: any) => ({ value: store[e.key] }))
   on('store.set', ($: any, e: any) => ((store[e.key] = e.value), { value: undefined }))
@@ -37,6 +40,47 @@ const chunks = async (stream: AsyncIterable<any>) => {
 
   return out.filter(c => c.kind === 'text').map(c => c.text).join('')
 }
+
+for (const surface of ['desktop', 'terminal'] as const) {
+  test(`switches.json disables Handoff and preserves lower layers (${surface})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const switches: { raw?: string } = { raw: '{"hud":false}' }
+    stubs(on, true, {}, 'layer below', switches)
+    await $.session.start({ surface, isInteractive: true, cwd: '/work' })
+    await measure($, 90)
+    const ui = await $.ui.mount({ plugin: 'handoff', surface, ...BAND })
+    expect(await ui.find({ type: 'Text', text: /Збери handoff/ })).toBeDefined()
+    switches.raw = '{"handoff":false}'
+    await clock.advance(3100)
+    expect(await ui.find({ type: 'Text', text: /Збери handoff/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'layer below' })).toBeDefined()
+    const before = fillModes.length
+    const off = await $.command.run({ command: 'handoff', args: '', origin: { kind: 'composer' } })
+    expect(off.text).toContain('вимкнено')
+    expect(fillModes).toHaveLength(before)
+    switches.raw = '{invalid'
+    await clock.advance(3100)
+    expect(await ui.find({ type: 'Text', text: /Збери handoff/ })).toBeUndefined()
+    switches.raw = undefined
+    await clock.advance(3100)
+    expect(await ui.find({ type: 'Text', text: /Збери handoff/ })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('Handoff starts disabled and adds no VS Code hint until enabled', async ($, on) => {
+  const clock = mock.clock(on)
+  const switches = { raw: '{"handoff":false}' }
+  stubs(on, true, {}, undefined, switches)
+  await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' })
+  await measure($, 90)
+  expect(await chunks($.turn.step(STEP))).toBe('Готово.')
+  switches.raw = '{}'
+  await clock.advance(3100)
+  await measure($, 90)
+  expect(await chunks($.turn.step(STEP))).toContain('Контекст 90%')
+})
 
 describe('handoff', () => {
   test('the context line and the button are not drawn here any more (the hud band has them)', async ($, on) => {
