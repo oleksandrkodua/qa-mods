@@ -1,9 +1,5 @@
-export type ClaimKind = 'tests' | 'api' | 'verified' | 'done' | 'safe'
-
-export interface Claim {
-  kind: ClaimKind
-  quote: string
-}
+import type { Claim, ClaimKind } from '../types'
+export type { Claim, ClaimKind } from '../types'
 
 // Cyrillic text: \b does not work there, so those patterns avoid it.
 const PATTERNS: Record<ClaimKind, RegExp[]> = {

@@ -1,15 +1,6 @@
 import type { Claim, ClaimKind } from './claims'
-
-export type EvKind = 'edit' | 'test' | 'http' | 'browser' | 'read' | 'run' | 'other'
-
-export interface Entry {
-  n: number
-  turn: number
-  tool: string
-  kind: EvKind
-  label: string
-  ok: boolean
-}
+import type { Assessment, Entry, EvKind, Row } from '../types'
+export type { Assessment, Entry, EvKind, Row } from '../types'
 
 const TEST =
   /(^|[\s;&|(])((npm|pnpm|yarn|bun)\s+(run\s+)?(test|t|e2e|check)\b|(pytest|py\.test|jest|vitest|mocha|rspec|phpunit|tox)\b)|\b(go|cargo|dotnet|swift|mvn|gradlew?)\s+test\b|playwright\s+test|cypress\s+run|node\s+--test|python3?\s+-m\s+(pytest|unittest)|claude\s+plugin\s+test/
@@ -38,19 +29,6 @@ export function classify(tool: string, args: { command?: unknown; file_path?: un
   if (/screenshot|browser|playwright|computer|navigate|chrome/i.test(tool)) return { kind: 'browser', label: tool }
 
   return { kind: 'other', label: tool }
-}
-
-export interface Row {
-  claim: Claim
-  supported: boolean
-  /** why it is unsupported, or what supports it */
-  note: string
-}
-
-export interface Assessment {
-  rows: Row[]
-  supported: number
-  status: 'VERIFIED' | 'PARTIALLY VERIFIED' | 'UNVERIFIED'
 }
 
 const WHY: Record<ClaimKind, string> = {

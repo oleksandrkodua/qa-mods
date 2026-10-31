@@ -1,10 +1,11 @@
+import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import { detectClaims } from './claims'
 import { assess, classify, warning } from './ledger'
-import type { Assessment, Entry } from './ledger'
 
 const MAX_ENTRIES = 500
+const history = atom({ plugin: 'verification-guard', key: 'history' } as const, { ledger: [], log: [], turn: 0, n: 0 })
 
 /**
  * Verification Guard: Claude's claims ("tests pass", "verified", "fixed", "no regression")
@@ -13,11 +14,6 @@ const MAX_ENTRIES = 500
  * Warn only: the text is already written when it can be judged, nothing is blocked.
  */
 export const register: Register = on => {
-  const ledger: Entry[] = []
-  const log: { turn: number; a: Assessment }[] = []
-  let turn = 0
-  let n = 0
-
   on('session.start', async ($, e, next) => {
     // a name already taken must not break the mod
     await $.command
@@ -30,8 +26,8 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('turn.start', ($, e, next) => {
-    turn += 1
+  on('turn.start', async ($, e, next) => {
+    await update($, history, saved => ({ ...saved, turn: saved.turn + 1 }))
 
     return next(e)
   })
@@ -40,9 +36,11 @@ export const register: Register = on => {
     const ran = await next(e)
     const { kind, label } = classify(String(e.tool), e as { command?: unknown; file_path?: unknown })
 
-    ledger.push({ n: ++n, turn, tool: String(e.tool), kind, label, ok: ran.deny === undefined && ran.isError !== true })
-
-    if (ledger.length > MAX_ENTRIES) ledger.shift()
+    await update($, history, saved => ({
+      ...saved,
+      n: saved.n + 1,
+      ledger: [...saved.ledger, { n: saved.n + 1, turn: saved.turn, tool: String(e.tool), kind, label, ok: ran.deny === undefined && ran.isError !== true }].slice(-MAX_ENTRIES),
+    }))
 
     return ran
   })
@@ -65,10 +63,11 @@ export const register: Register = on => {
         sawTool = true
       } else if (value.kind === 'stop' && e.agentId === undefined && !sawTool && value.stopReason === 'end_turn' && last >= 0) {
         // the final answer of the main loop: judge its claims before it is closed
+        const { ledger, turn } = await read($, history)
         const a = assess(detectClaims(text), ledger, turn)
 
         if (a.rows.length) {
-          log.push({ turn, a })
+          await update($, history, saved => ({ ...saved, log: [...saved.log, { turn, a }] }))
 
           if (a.supported < a.rows.length) yield { kind: 'text', index: last, text: warning(a) }
         }
@@ -78,7 +77,8 @@ export const register: Register = on => {
     }
   })
 
-  on('command.run', { command: 'evidence' }, () => {
+  on('command.run', { command: 'evidence' }, async $ => {
+    const { ledger, log } = await read($, history)
     const rows = log.flatMap(x => x.a.rows.map(r => ({ turn: x.turn, r })))
     const ok = rows.filter(x => x.r.supported).length
     const count = (k: string, good?: boolean) => ledger.filter(x => x.kind === k && (good === undefined || x.ok === good)).length

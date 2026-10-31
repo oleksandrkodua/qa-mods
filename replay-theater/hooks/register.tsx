@@ -1,3 +1,4 @@
+import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import { stats, unifiedDiff } from './diff'
@@ -5,21 +6,13 @@ import { stats, unifiedDiff } from './diff'
 const PANE = 'replay-theater'
 const MAX_STEPS = 200
 
-interface Step {
-  n: number
-  tool: string
-  path: string
-  diff: string
-}
+const replay = atom({ plugin: 'replay-theater', key: 'replay' } as const, { steps: [], cursor: 0 })
 
 /**
  * Replay Theater: records each successful Edit/Write as a diff step and lets
  * `/replay` page through them with Prev / Next.
  */
 export const register: Register = on => {
-  const steps: Step[] = []
-  let cursor = 0
-
   on('session.start', async ($, e, next) => {
     // a build that already ships /replay refuses the name: keep going without it
     await $.command
@@ -47,18 +40,19 @@ export const register: Register = on => {
         () => '',
       )
 
-      steps.push({ n: steps.length + 1, tool: e.tool, path, diff: unifiedDiff(before, after) })
+      const diff = unifiedDiff(before, after)
+      await update($, replay, saved => {
+        const steps = [...saved.steps, { n: saved.steps.length + 1, tool: e.tool, path, diff }].slice(-MAX_STEPS)
 
-      if (steps.length > MAX_STEPS) steps.shift()
-
-      cursor = steps.length - 1
-      $.ui.invalidate('ui.render')
+        return { steps, cursor: steps.length - 1 }
+      })
     }
 
     return ran
   })
 
   on('command.run', { command: 'replay' }, async ($, e) => {
+    let { steps, cursor } = await read($, replay)
     if (steps.length === 0) return { text: 'Replay Theater: no file edits recorded in this session yet.' }
 
     // `/replay`, `/replay 2`, `/replay next`, `/replay prev`: text works on every surface.
@@ -68,6 +62,8 @@ export const register: Register = on => {
     else if (arg === 'prev') cursor = Math.max(0, cursor - 1)
     else if (/^\d+$/.test(arg)) cursor = Math.min(steps.length, Math.max(1, Number(arg))) - 1
     else cursor = steps.length - 1
+
+    await update($, replay, saved => ({ ...saved, cursor }))
 
     const s = steps[cursor]!
     const { added, removed } = stats(s.diff)
@@ -81,6 +77,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { steps, cursor } = await read($, replay)
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const s = steps[cursor]
 
@@ -88,9 +85,8 @@ export const register: Register = on => {
 
     const { added, removed } = stats(s.diff)
 
-    const go = (d: number) => () => {
-      cursor = Math.min(steps.length - 1, Math.max(0, cursor + d))
-      $.ui.invalidate('ui.render')
+    const go = (d: number) => async () => {
+      await update($, replay, saved => ({ ...saved, cursor: Math.min(saved.steps.length - 1, Math.max(0, saved.cursor + d)) }))
     }
 
     return (

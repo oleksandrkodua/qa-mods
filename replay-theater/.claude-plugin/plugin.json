@@ -1,6 +1,7 @@
 {
   "name": "replay-theater",
-  "version": "0.1.3",
+  "version": "0.1.4",
+  "types": "./types/index.d.ts",
   "description": "/replay opens a pane that steps through the session's file edits (Edit, Write, MultiEdit) one at a time, showing each as a diff with Prev / Next.",
   "author": {
     "name": "noaod"
