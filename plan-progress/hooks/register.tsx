@@ -1654,7 +1654,8 @@ export const register: Register = on => {
     const titleWidth = Math.min(Math.round(total * 0.4), Math.max(...list.map(p => Math.round(textWidth(p.title)))))
     // fork (qa-mods): the right part takes 140 px as upstream, 30 more for the ▾ of a cut title. The 70 px once kept for
     // the handoff Clippy's column left of the bars is gone: that column is as narrow as its picture again (handoff 0.7.0)
-    const trackW = Math.max(120, Math.min(1400, total - titleWidth - (list.some(p => textWidth(p.title) > titleWidth) ? 170 : 140)))
+    // every bar has the ▾ now (not only a cut title), so the 30 px are always kept; with 140 the ✕ was pushed past the band
+    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 170))
     await read($, tick)
     const opened = await read($, expanded)
     // fork (qa-mods): a bar finished more than DONE_HOLD_MS ago folds into one line, "✓ N готово ▾", on top of the bars

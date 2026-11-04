@@ -47,8 +47,9 @@ const rightPart = async () => {
   return 960 - track - 8 * titleCols
 }
 const plain = await rightPart()
-assert.ok(plain > 132 && plain <= 140, `right part ${plain} px with a title that fits`)
-console.log('ok   qa_fork_right_part_takes_140px', plain)
+// every bar has the ▾ (a title that fits too), so the right part is 140 px + 30 px for it
+assert.ok(plain > 162 && plain <= 170, `right part ${plain} px with a title that fits`)
+console.log('ok   qa_fork_right_part_takes_170px', plain)
 
 // a title that does not fit gets a ▾ button that opens it in full (wrapped); a short title gets none
 const buttons = tree => {
